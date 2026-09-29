@@ -367,7 +367,8 @@ fi
 REF=static-sites-tatweer-1
 LABELS=$(docker inspect "$REF" --format '{{json .Config.Labels}}' 2>/dev/null || echo '{}')
 RESOLVER=$(echo "$LABELS" | grep -o 'certresolver":"[^"]*' | head -1 | cut -d'"' -f3)
-ENTRY=$(echo "$LABELS" | grep -o 'entrypoints":"[^"]*' | head -1 | cut -d'"' -f3)
+# نستخدم دايمًا مدخل HTTPS (Meta بتطلب https)
+ENTRY=$(echo "$LABELS" | grep -o 'entrypoints":"[^"]*' | cut -d'"' -f3 | tr ',' '\n' | grep -m1 -i secure || true)
 NET=$(docker inspect n8n-traefik-1 --format '{{range $k,$v := .NetworkSettings.Networks}}{{$k}} {{end}}' | awk '{print $1}')
 RESOLVER=${RESOLVER:-mytlschallenge}; ENTRY=${ENTRY:-websecure}
 echo "==> Traefik: network=$NET entrypoint=$ENTRY certresolver=$RESOLVER"
