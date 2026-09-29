@@ -309,6 +309,7 @@ ROUTER_PROMPT = """أنت planner-router في نظام وكلاء لشركة ع�
   "location": "المنطقة لو اتذكرت أو null",
   "payment": "كاش أو تقسيط لو اتذكر أو null",
   "rooms": "عدد الأوض لو اتذكر أو null",
+  "viewing": "الميعاد اللي العميل عايز يعاين فيه لو اتذكر (زي: بكرة الظهر) أو null",
   "needs_human": true | false,
   "missing_info": ["الحاجات الناقصة عشان نأهل العميل، مثلا: الميزانية، المساحة، طريقة الدفع"]
 }
@@ -324,6 +325,7 @@ AGENT_PROMPT = f"""أنت real-estate-agent، مساعد مبيعات في شر�
 - الشركة شغالة في "مدينة الفردوس للقوات المسلحة" في 6 أكتوبر (الجيزة). لو العميل قال "الفردوس" أو شارع جوه الفردوس، ده كفاية — متسألش عن المدينة أو المحافظة.
 - رقم الشركة ده رقم العميل يتصل بيه. لو زميلك هيكلم العميل، قول "زميلي هيكلمك" بس — متقولش "هيكلمك على رقم كذا".
 - ممنوع تكتب أي رقم تليفون غير رقم الشركة{(' ' + COMPANY_PHONE) if COMPANY_PHONE else ''}. متخترعش رقم للعميل ولا لزميلك. لو زميلك هيكلمه، قول "هيكلمك على نفس الرقم ده".
+- لو العميل قال ميعاد يحب يعاين فيه، متقولش "سجلت المعاينة" أو "اتحجزت" — قول إنك بلّغت زميلك بالميعاد اللي يناسبه وهو هيكلمه يأكده.
 - متأكدش معلومة العميل ماقالهاش (زي كاش أو تقسيط أو ميعاد) — اسأل عنها.
 - متقولش إنك ذكاء اصطناعي إلا لو العميل سأل صراحة — ولو سأل، قول الحقيقة."""
 
@@ -347,8 +349,8 @@ async def planner_router(phone: str, text: str) -> dict:
 def _known_facts(phone: str, routing: dict) -> str:
     """المعلومات المتسجلة عن العميل (من قاعدة البيانات + الرسالة الحالية)."""
     lead = dict(LEADS.get(phone, {}))
-    lead.update({k: v for k, v in routing.items() if v and k in ("budget", "area_m2", "location", "payment", "rooms")})
-    labels = {"budget": "الميزانية", "area_m2": "المساحة", "location": "المنطقة", "payment": "طريقة الدفع", "rooms": "عدد الأوض"}
+    lead.update({k: v for k, v in routing.items() if v and k in ("budget", "area_m2", "location", "payment", "rooms", "viewing")})
+    labels = {"budget": "الميزانية", "area_m2": "المساحة", "location": "المنطقة", "payment": "طريقة الدفع", "rooms": "عدد الأوض", "viewing": "ميعاد المعاينة المفضل"}
     parts = [f"{labels[k]}: {lead[k]}" for k in labels if lead.get(k)]
     return "، ".join(parts) or "مفيش"
 
@@ -390,7 +392,7 @@ async def crm_publisher(phone: str, name: str, routing: dict, from_ad: bool) -> 
         "qualification": routing.get("qualification"),
         "needs_human": routing.get("needs_human", False),
     })
-    for key in ("budget", "area_m2", "location", "payment", "rooms"):
+    for key in ("budget", "area_m2", "location", "payment", "rooms", "viewing"):
         if routing.get(key):
             lead[key] = routing[key]
     LEADS.save(phone)
@@ -664,7 +666,7 @@ E = html.escape
 INTENTS = {"buy": "شراء", "rent": "إيجار", "sell": "بيع", "inquiry": "استفسار",
            "greeting": "تحية", "complaint": "شكوى", "other": "أخرى"}
 QUAL = {"hot": ("ساخن 🔥", "hot"), "warm": ("مهتم", "warm"), "cold": ("بارد", "cold")}
-FACTS = {"budget": "الميزانية", "area_m2": "المساحة", "location": "المنطقة", "payment": "الدفع", "rooms": "الأوض"}
+FACTS = {"budget": "الميزانية", "area_m2": "المساحة", "location": "المنطقة", "payment": "الدفع", "rooms": "الأوض", "viewing": "المعاينة"}
 
 
 def auth(cred: HTTPBasicCredentials = Depends(_basic)) -> None:
