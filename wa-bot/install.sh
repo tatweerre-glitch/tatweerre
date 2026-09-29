@@ -30,6 +30,7 @@ from fastapi import BackgroundTasks, FastAPI, HTTPException, Query, Request  # n
 from fastapi.responses import PlainTextResponse  # noqa: E402
 
 import agents  # noqa: E402
+import dashboard  # noqa: E402
 import followup  # noqa: E402
 import whatsapp  # noqa: E402
 
@@ -38,7 +39,8 @@ log = logging.getLogger("wa-bot")
 
 VERIFY_TOKEN = os.getenv("WHATSAPP_VERIFY_TOKEN", "")
 
-app = FastAPI(title="Tatweer WhatsApp Agents")
+app = FastAPI(title="Tatweer WhatsApp Agents", docs_url=None, redoc_url=None, openapi_url=None)
+app.include_router(dashboard.router)
 
 # Meta ممكن تبعت نفس الرسالة أكتر من مرة — نمنع الرد المكرر
 _seen_ids: deque = deque(maxlen=2000)
@@ -632,6 +634,234 @@ async def loop() -> None:
 
 __EOF_TATWEER__
 
+cat > dashboard.py <<'__EOF_TATWEER__'
+"""
+لوحة العملاء: https://bot.tatweereg.tech/dashboard  (اسم المستخدم tatweer + DASHBOARD_PASSWORD من .env)
+- قائمة العملاء بالحالة والطلب وآخر نشاط، مع فلاتر (محتاج موظف / ساخن / عليه متابعة)
+- صفحة لكل عميل فيها المحادثة كاملة + زرار واتساب + "تم التواصل" + إيقاف/تشغيل المتابعة
+- تصدير Excel (CSV)
+"""
+import csv
+import html
+import io
+import os
+import secrets
+from datetime import datetime
+from zoneinfo import ZoneInfo
+
+from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi.responses import HTMLResponse, RedirectResponse, Response
+from fastapi.security import HTTPBasic, HTTPBasicCredentials
+
+import agents
+import followup
+
+router = APIRouter(prefix="/dashboard")
+_basic = HTTPBasic(realm="Tatweer")
+CAIRO, UTC = ZoneInfo("Africa/Cairo"), ZoneInfo("UTC")
+E = html.escape
+
+INTENTS = {"buy": "شراء", "rent": "إيجار", "sell": "بيع", "inquiry": "استفسار",
+           "greeting": "تحية", "complaint": "شكوى", "other": "أخرى"}
+QUAL = {"hot": ("ساخن 🔥", "hot"), "warm": ("مهتم", "warm"), "cold": ("بارد", "cold")}
+FACTS = {"budget": "الميزانية", "area_m2": "المساحة", "location": "المنطقة", "payment": "الدفع", "rooms": "الأوض"}
+
+
+def auth(cred: HTTPBasicCredentials = Depends(_basic)) -> None:
+    pw = os.getenv("DASHBOARD_PASSWORD", "")
+    ok = pw and secrets.compare_digest(cred.username.encode(), b"tatweer") \
+        and secrets.compare_digest(cred.password.encode(), pw.encode())
+    if not ok:
+        raise HTTPException(401, "wrong password", headers={"WWW-Authenticate": 'Basic realm="Tatweer"'})
+
+
+def _local(ts: str | None) -> str:
+    if not ts:
+        return "-"
+    try:
+        d = datetime.fromisoformat(ts).replace(tzinfo=UTC).astimezone(CAIRO)
+    except ValueError:
+        return ts[:16]
+    today = datetime.now(CAIRO).date()
+    if d.date() == today:
+        return "النهاردة " + d.strftime("%I:%M %p").replace("AM", "ص").replace("PM", "م")
+    return d.strftime("%d/%m %I:%M %p").replace("AM", "ص").replace("PM", "م")
+
+
+def _rows():
+    stats = {p: (n, last) for p, n, last in agents._db.execute(
+        "SELECT phone, COUNT(*), MAX(ts) FROM messages GROUP BY phone")}
+    sent = {}
+    for p, k in agents._db.execute("SELECT phone, kind FROM followups"):
+        sent.setdefault(p, []).append(k)
+    due = {p: k for p, k, _ in followup.candidates()}
+    out = []
+    for phone, lead in agents.LEADS.items():
+        n, last = stats.get(phone, (0, lead.get("last_seen")))
+        out.append({**lead, "phone": phone, "n": n, "last": last or "",
+                    "sent": sent.get(phone, []), "due": due.get(phone)})
+    out.sort(key=lambda r: r["last"], reverse=True)
+    return out
+
+
+def _check_origin(request: Request) -> None:
+    origin = request.headers.get("origin") or request.headers.get("referer") or ""
+    if origin and request.url.hostname not in origin:
+        raise HTTPException(403, "bad origin")
+
+
+CSS = """
+:root{--bg:#0a0c0a;--card:#14140f;--line:#2a2a22;--gold:#E8B84B;--txt:#f2f0e8;--mut:#a3a092;
+--green:#22c55e;--red:#ef4444;--blue:#4CA6FF}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--txt);font-family:Cairo,system-ui,sans-serif;font-size:15px}
+a{color:inherit;text-decoration:none}.wrap{max-width:1000px;margin:auto;padding:16px}
+header{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:14px}
+h1{font-size:20px;margin:0;color:var(--gold)}h1 small{color:var(--mut);font-size:13px;font-weight:400;margin-inline-start:8px}
+.stats{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:14px}
+.stat{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:10px 12px}
+.stat b{display:block;font-size:22px;color:var(--gold)}.stat span{color:var(--mut);font-size:12px}
+.tabs{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px}
+.tabs a{padding:6px 12px;border:1px solid var(--line);border-radius:999px;color:var(--mut);font-size:13px}
+.tabs a.on{background:var(--gold);color:#111;border-color:var(--gold);font-weight:700}
+.lead{display:block;background:var(--card);border:1px solid var(--line);border-radius:12px;padding:12px 14px;margin-bottom:8px}
+.lead:hover{border-color:var(--gold)}.top{display:flex;justify-content:space-between;gap:8px;align-items:center}
+.name{font-weight:700}.ph{color:var(--mut);font-size:13px;direction:ltr;unicode-bidi:isolate;display:inline-block}
+.facts{color:var(--mut);font-size:13px;margin-top:4px}.meta{color:var(--mut);font-size:12px;white-space:nowrap}
+.b{display:inline-block;font-size:11px;padding:2px 8px;border-radius:999px;margin-inline-start:4px;border:1px solid var(--line)}
+.b.hot{background:#3a1d0c;color:#ffb070;border-color:#6b3510}.b.warm{background:#2e2610;color:var(--gold)}
+.b.cold{color:var(--mut)}.b.human{background:#3a1010;color:#ff9b9b;border-color:#6b1d1d}
+.b.fu{color:var(--blue);border-color:#1d3a5c}.b.off{color:var(--mut);text-decoration:line-through}
+.btn{display:inline-block;padding:8px 14px;border-radius:10px;border:1px solid var(--line);background:var(--card);color:var(--txt);font:inherit;cursor:pointer}
+.btn.g{background:var(--green);border-color:var(--green);color:#04120a;font-weight:700}.btn.gold{border-color:var(--gold);color:var(--gold)}
+.actions{display:flex;gap:8px;flex-wrap:wrap;margin:12px 0}
+.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px;margin-bottom:12px}
+.kv{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:8px}.kv div span{display:block;color:var(--mut);font-size:12px}
+.chat{display:flex;flex-direction:column;gap:6px}
+.msg{max-width:85%;padding:8px 12px;border-radius:12px;white-space:pre-wrap;line-height:1.6}
+.msg.c{align-self:flex-start;background:#1f2a1f;border:1px solid #2c3d2c}
+.msg.a{align-self:flex-end;background:#2a2615;border:1px solid #453d1c}
+.msg small{display:block;color:var(--mut);font-size:11px;margin-top:2px}
+.empty{color:var(--mut);text-align:center;padding:30px}
+@media(max-width:600px){.stats{grid-template-columns:repeat(2,1fr)}.top{flex-wrap:wrap}}
+"""
+
+
+def _page(title: str, body: str, refresh: bool = False) -> HTMLResponse:
+    return HTMLResponse(f"""<!doctype html><html lang="ar" dir="rtl"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">{'<meta http-equiv="refresh" content="60">' if refresh else ''}
+<title>{E(title)}</title><link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;700&display=swap" rel="stylesheet">
+<style>{CSS}</style></head><body><div class="wrap">{body}</div></body></html>""")
+
+
+def _badges(r: dict) -> str:
+    q = QUAL.get(r.get("qualification") or "")
+    out = f'<span class="b {q[1]}">{q[0]}</span>' if q else ""
+    if r.get("needs_human"):
+        out += '<span class="b human">محتاج موظف</span>'
+    if r.get("opted_out"):
+        out += '<span class="b off">المتابعة موقوفة</span>'
+    elif r.get("due"):
+        out += '<span class="b fu">عليه متابعة</span>'
+    elif r.get("sent"):
+        out += f'<span class="b fu">اتتابع ({len(r["sent"])})</span>'
+    if r.get("from_ad"):
+        out += '<span class="b">من إعلان</span>'
+    return out
+
+
+def _facts(r: dict) -> str:
+    return " · ".join(f"{v}: {E(str(r[k]))}" for k, v in FACTS.items() if r.get(k)) or "لسه مفيش تفاصيل"
+
+
+FILTERS = {"all": "الكل", "human": "محتاج موظف", "hot": "ساخن", "fu": "عليهم متابعة"}
+
+
+@router.get("", response_class=HTMLResponse, dependencies=[Depends(auth)])
+def index(f: str = "all"):
+    rows = _rows()
+    today = datetime.now(CAIRO).date()
+    new_today = sum(1 for r in rows if r.get("first_seen") and
+                    datetime.fromisoformat(r["first_seen"]).replace(tzinfo=UTC).astimezone(CAIRO).date() == today)
+    stats = [(len(rows), "كل العملاء"), (new_today, "جداد النهاردة"),
+             (sum(1 for r in rows if r.get("needs_human")), "محتاجين موظف"),
+             (sum(1 for r in rows if r.get("qualification") == "hot"), "ساخنين")]
+    pick = {"human": lambda r: r.get("needs_human"), "hot": lambda r: r.get("qualification") == "hot",
+            "fu": lambda r: r.get("due") and not r.get("opted_out")}.get(f, lambda r: True)
+    shown = [r for r in rows if pick(r)]
+    items = "".join(f"""<a class="lead" href="/dashboard/lead/{E(r['phone'])}"><div class="top">
+<div><span class="name">{E(r.get('name') or 'بدون اسم')}</span> <span class="ph">+{E(r['phone'])}</span>{_badges(r)}</div>
+<div class="meta">{_local(r['last'])} · {r['n']} رسالة</div></div>
+<div class="facts">{INTENTS.get(r.get('intent') or '', '-')} — {_facts(r)}</div></a>""" for r in shown)
+    body = f"""<header><h1>عملاء تطوير<small>بوت الواتساب</small></h1>
+<a class="btn gold" href="/dashboard/leads.csv">تنزيل Excel</a></header>
+<div class="stats">{''.join(f'<div class="stat"><b>{n}</b><span>{t}</span></div>' for n, t in stats)}</div>
+<nav class="tabs">{''.join(f'<a href="?f={k}" class="{"on" if k == f else ""}">{v}</a>' for k, v in FILTERS.items())}</nav>
+{items or '<div class="empty">مفيش عملاء هنا</div>'}"""
+    return _page("عملاء تطوير", body, refresh=True)
+
+
+@router.get("/lead/{phone}", response_class=HTMLResponse, dependencies=[Depends(auth)])
+def lead(phone: str):
+    r = next((x for x in _rows() if x["phone"] == phone), None)
+    if not r:
+        raise HTTPException(404)
+    msgs = agents._db.execute("SELECT role, content, ts FROM messages WHERE phone=? ORDER BY id", (phone,)).fetchall()
+    chat = "".join(f'<div class="msg {"c" if role == "عميل" else "a"}">{E(c)}<small>{"العميل" if role == "عميل" else "البوت"} · {_local(ts)}</small></div>'
+                   for role, c, ts in msgs)
+    kv = "".join(f"<div><span>{v}</span>{E(str(r.get(k) or '-'))}</div>" for k, v in FACTS.items())
+    kv += f"<div><span>النية</span>{INTENTS.get(r.get('intent') or '', '-')}</div>"
+    kv += f"<div><span>أول تواصل</span>{_local(r.get('first_seen'))}</div>"
+    body = f"""<header><h1>{E(r.get('name') or 'بدون اسم')}<small class="ph">+{E(phone)}</small></h1>
+<a class="btn" href="/dashboard">→ رجوع</a></header>
+<div>{_badges(r)}</div>
+<div class="actions">
+<a class="btn g" href="https://wa.me/{E(phone)}" target="_blank">فتح واتساب</a>
+<a class="btn" href="tel:+{E(phone)}">اتصال</a>
+{'<form method="post" action="/dashboard/lead/' + E(phone) + '/handled"><button class="btn gold">✔ تم التواصل</button></form>' if r.get('needs_human') else ''}
+<form method="post" action="/dashboard/lead/{E(phone)}/followup"><button class="btn">{'تشغيل المتابعة' if r.get('opted_out') else 'إيقاف المتابعة'}</button></form>
+</div>
+<div class="card"><div class="kv">{kv}</div></div>
+<div class="card chat">{chat or '<div class="empty">مفيش رسايل</div>'}</div>"""
+    return _page(r.get("name") or phone, body)
+
+
+@router.post("/lead/{phone}/handled", dependencies=[Depends(auth)])
+def handled(phone: str, request: Request):
+    _check_origin(request)
+    lead = agents.LEADS.get(phone)
+    if lead is not None:
+        lead["needs_human"] = False
+        lead["handled_at"] = datetime.utcnow().isoformat()
+        agents.LEADS.save(phone)
+    return RedirectResponse(f"/dashboard/lead/{phone}", status_code=303)
+
+
+@router.post("/lead/{phone}/followup", dependencies=[Depends(auth)])
+def toggle_followup(phone: str, request: Request):
+    _check_origin(request)
+    lead = agents.LEADS.get(phone)
+    if lead is not None:
+        lead["opted_out"] = not lead.get("opted_out", False)
+        agents.LEADS.save(phone)
+    return RedirectResponse(f"/dashboard/lead/{phone}", status_code=303)
+
+
+@router.get("/leads.csv", dependencies=[Depends(auth)])
+def export_csv():
+    buf = io.StringIO()
+    w = csv.writer(buf)
+    w.writerow(["الاسم", "الرقم", "النية", "التأهيل", *FACTS.values(), "محتاج موظف", "من إعلان", "أول تواصل", "آخر نشاط", "عدد الرسايل"])
+    for r in _rows():
+        w.writerow([r.get("name", ""), "+" + r["phone"], INTENTS.get(r.get("intent") or "", ""),
+                    QUAL.get(r.get("qualification") or "", ("",))[0], *[r.get(k) or "" for k in FACTS],
+                    "نعم" if r.get("needs_human") else "", "نعم" if r.get("from_ad") else "",
+                    _local(r.get("first_seen")), _local(r["last"]), r["n"]])
+    return Response("﻿" + buf.getvalue(), media_type="text/csv; charset=utf-8",
+                    headers={"Content-Disposition": 'attachment; filename="tatweer-leads.csv"'})
+
+__EOF_TATWEER__
+
 cat > requirements.txt <<'__EOF_TATWEER__'
 fastapi>=0.110
 uvicorn[standard]>=0.29
@@ -679,6 +909,12 @@ EOF
   chmod 600 .env
 fi
 
+# باسورد لوحة العملاء — بيتعمل تلقائي لو مش موجود (غيّره بـ set-dashboard-password.sh)
+if ! grep -q '^DASHBOARD_PASSWORD=.' .env; then
+  sed -i '/^DASHBOARD_PASSWORD=/d' .env
+  echo "DASHBOARD_PASSWORD=$(head -c 12 /dev/urandom | od -An -tx1 | tr -d ' \n')" >> .env
+fi
+
 # ---- قراءة إعدادات Traefik من موقع تطوير الشغال ----
 REF=static-sites-tatweer-1
 LABELS=$(docker inspect "$REF" --format '{{json .Config.Labels}}' 2>/dev/null || echo '{}')
@@ -709,6 +945,7 @@ if docker exec tatweer-wa-bot python -c "import urllib.request;print(urllib.requ
   echo "✅ البوت شغال."
   echo "Callback URL:  https://$DOMAIN/webhook"
   echo "Verify token:  $(grep WHATSAPP_VERIFY_TOKEN .env | cut -d= -f2)"
+  echo "لوحة العملاء:  https://$DOMAIN/dashboard  (المستخدم: tatweer)"
 else
   echo "❌ البوت ما اشتغلش — شوف اللوج:"; docker logs --tail 40 tatweer-wa-bot
 fi

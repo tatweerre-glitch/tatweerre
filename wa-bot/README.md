@@ -77,3 +77,8 @@ WhatsApp ← Configuration ← Webhook ← Edit:
 - مفيش متابعة لعميل طلب موظف، أو قال "مش مهتم"، أو كان بيسلّم بس. ومفيش رسايل من ١٠ بالليل لـ ٩ الصبح (القاهرة).
 - الحالة: `curl -fsSL https://raw.githubusercontent.com/tatweerre-glitch/tatweerre/main/wa-bot/followups.sh | bash`
 - إعدادات اختيارية في `.env`: `FOLLOWUP_ENABLED=0` للإيقاف، `FOLLOWUP1_HOURS`، `FOLLOWUP2_HOURS`، `FOLLOWUP_TEMPLATE`، `FOLLOWUP_TEMPLATE_LANG` (الافتراضي ar).
+
+## لوحة العملاء (dashboard.py)
+- الرابط: https://bot.tatweereg.tech/dashboard — المستخدم `tatweer` والباسورد `DASHBOARD_PASSWORD` في `.env`.
+- تغيير الباسورد: `curl -fsSL -o p.sh https://raw.githubusercontent.com/tatweerre-glitch/tatweerre/main/wa-bot/set-dashboard-password.sh && bash p.sh`
+- فيها: كل العملاء وحالتهم، فلاتر (محتاج موظف / ساخن / عليهم متابعة)، المحادثة كاملة، زرار واتساب واتصال، "تم التواصل"، إيقاف المتابعة، وتنزيل Excel.
