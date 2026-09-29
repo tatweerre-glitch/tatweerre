@@ -230,8 +230,7 @@ from datetime import datetime
 from anthropic import AsyncAnthropic
 
 MODEL = os.getenv("CLAUDE_MODEL", "claude-sonnet-5-5")
-COMPANY = os.getenv("COMPANY_NAME", "تطوير للخدمات العقارية")
-COMPANY_PHONE = os.getenv("COMPANY_PHONE", "")
+import config
 
 client = AsyncAnthropic()  # بياخد ANTHROPIC_API_KEY من البيئة
 
@@ -295,7 +294,7 @@ _PHONE_RE = _re.compile(r"(?:\+?20|0)1[0125][\s\-]?\d{3,4}[\s\-]?\d{4}")
 
 def _clean_phones(reply: str) -> str:
     """شبكة أمان: أي رقم موبايل مصري في الرد غير رقم الشركة بيتشال."""
-    allowed = _re.sub(r"\D", "", COMPANY_PHONE)[-10:]
+    allowed = _re.sub(r"\D", "", config.get()["phone"])[-10:]
     def fix(m):
         return m.group(0) if allowed and _re.sub(r"\D", "", m.group(0))[-10:] == allowed else "نفس الرقم ده"
     return _PHONE_RE.sub(fix, reply)
@@ -318,18 +317,23 @@ ROUTER_PROMPT = """أنت planner-router في نظام وكلاء لشركة ع�
 hot = عنده ميزانية وجاهز يعاين قريب. warm = مهتم بس ناقص معلومات. cold = استفسار عام.
 needs_human = true لو العميل طلب يكلم حد، أو فيه شكوى، أو جاهز يدفع/يعاين."""
 
-AGENT_PROMPT = f"""أنت real-estate-agent، مساعد مبيعات في شركة "{COMPANY}" بترد على العملاء على واتساب.
+def agent_prompt() -> str:
+    """تعليمات البوت — بتتبني من إعدادات المكتب (لوحة العملاء ← الإعدادات) في كل رسالة."""
+    c = config.get()
+    phone = c["phone"]
+    extra = f"\n{c['extra_rules']}" if c.get("extra_rules") else ""
+    return f"""أنت real-estate-agent، مساعد مبيعات في شركة "{c['name']}" بترد على العملاء على واتساب.
 - اتكلم بالعامية المصرية المحترمة، ردود قصيرة ومباشرة (٢-٤ سطور) زي أي موظف مبيعات شاطر.
 - هدفك: ترد فورًا، وتأهل العميل بسؤال واحد في المرة عن الحاجة الناقصة (الميزانية، المساحة، المنطقة، كاش ولا تقسيط، إمتى عايز يستلم).
 - ممنوع تخترع أسعار أو وحدات أو مواعيد. لو مش عارف، قول إن مستشار من الشركة هيتواصل معاه بالتفاصيل.
 - ممنوع تذكر رقم أي عمارة حقيقي. استخدم كود الوحدة بس (مثال: MAF-96-S-01).
-- لو العميل جاهز يعاين أو طلب يكلم حد، قوله إن زميلك هيكلمه قريب{(' أو يتصل على ' + COMPANY_PHONE) if COMPANY_PHONE else ''}.
-- الشركة شغالة في "مدينة الفردوس للقوات المسلحة" في 6 أكتوبر (الجيزة). لو العميل قال "الفردوس" أو شارع جوه الفردوس، ده كفاية — متسألش عن المدينة أو المحافظة.
+- لو العميل جاهز يعاين أو طلب يكلم حد، قوله إن زميلك هيكلمه قريب{(' أو يتصل على ' + phone) if phone else ''}.
+- {c['area_context']}
 - رقم الشركة ده رقم العميل يتصل بيه. لو زميلك هيكلم العميل، قول "زميلي هيكلمك" بس — متقولش "هيكلمك على رقم كذا".
-- ممنوع تكتب أي رقم تليفون غير رقم الشركة{(' ' + COMPANY_PHONE) if COMPANY_PHONE else ''}. متخترعش رقم للعميل ولا لزميلك. لو زميلك هيكلمه، قول "هيكلمك على نفس الرقم ده".
+- ممنوع تكتب أي رقم تليفون غير رقم الشركة{(' ' + phone) if phone else ''}. متخترعش رقم للعميل ولا لزميلك. لو زميلك هيكلمه، قول "هيكلمك على نفس الرقم ده".
 - لو العميل قال ميعاد يحب يعاين فيه، متقولش "سجلت المعاينة" أو "اتحجزت" — قول إنك بلّغت زميلك بالميعاد اللي يناسبه وهو هيكلمه يأكده.
 - متأكدش معلومة العميل ماقالهاش (زي كاش أو تقسيط أو ميعاد) — اسأل عنها.
-- متقولش إنك ذكاء اصطناعي إلا لو العميل سأل صراحة — ولو سأل، قول الحقيقة."""
+- متقولش إنك ذكاء اصطناعي إلا لو العميل سأل صراحة — ولو سأل، قول الحقيقة.{extra}"""
 
 
 async def planner_router(phone: str, text: str) -> dict:
@@ -380,7 +384,7 @@ async def real_estate_agent(phone: str, name: str, text: str, routing: dict) -> 
             cleaned.append(m)
     if cleaned[0]["role"] != "user":
         cleaned.pop(0)
-    resp = await client.messages.create(model=MODEL, max_tokens=3000, system=AGENT_PROMPT, messages=cleaned)
+    resp = await client.messages.create(model=MODEL, max_tokens=3000, system=agent_prompt(), messages=cleaned)
     return _clean_phones(_text(resp))
 
 
@@ -550,7 +554,7 @@ def candidates(now: datetime | None = None) -> list[tuple[str, str, float]]:
     return out
 
 
-NUDGE_PROMPT = agents.AGENT_PROMPT + """
+NUDGE_TASK = """
 
 [مهمة خاصة] العميل ساكت من حوالي يوم. اكتب رسالة متابعة واحدة قصيرة جدًا (سطر أو اتنين) تكمّل من آخر نقطة في الكلام:
 فكّره بطلبه، واسأله السؤال الجاي اللي محتاجينه، أو اعرض إن زميلك يكلمه. من غير ضغط ومن غير اعتذار عن الإزعاج.
@@ -571,7 +575,7 @@ async def _write_nudge(phone: str) -> str:
     if cleaned[0]["role"] != "user":
         cleaned.pop(0)
     try:
-        resp = await agents.client.messages.create(model=agents.MODEL, max_tokens=2000, system=NUDGE_PROMPT, messages=cleaned)
+        resp = await agents.client.messages.create(model=agents.MODEL, max_tokens=2000, system=agents.agent_prompt() + NUDGE_TASK, messages=cleaned)
         text = agents._clean_phones(agents._text(resp))
     except Exception:
         log.exception("nudge generation failed for %s", phone)
@@ -651,6 +655,7 @@ import io
 import os
 import secrets
 from datetime import datetime
+from urllib.parse import parse_qs
 from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -658,6 +663,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 
 import agents
+import config
 import followup
 
 router = APIRouter(prefix="/dashboard")
@@ -745,6 +751,11 @@ h1{font-size:20px;margin:0;color:var(--gold)}h1 small{color:var(--mut);font-size
 .msg.c{align-self:flex-start;background:#1f2a1f;border:1px solid #2c3d2c}
 .msg.a{align-self:flex-end;background:#2a2615;border:1px solid #453d1c}
 .msg small{display:block;color:var(--mut);font-size:11px;margin-top:2px}
+label{display:block;margin:14px 0 6px;font-weight:700}.hint{color:var(--mut);font-size:12px;font-weight:400;display:block}
+input,textarea{width:100%;background:var(--bg);color:var(--txt);border:1px solid var(--line);border-radius:10px;padding:10px;font:inherit}
+textarea{min-height:110px;resize:vertical;line-height:1.7}input:focus,textarea:focus{outline:none;border-color:var(--gold)}
+.ok{background:#0f2a18;border:1px solid #1d5c33;color:#8ff0b0;padding:10px 12px;border-radius:10px;margin-bottom:12px}
+.err{background:#3a1010;border:1px solid #6b1d1d;color:#ff9b9b;padding:10px 12px;border-radius:10px;margin-bottom:12px}
 .empty{color:var(--mut);text-align:center;padding:30px}
 @media(max-width:600px){.stats{grid-template-columns:repeat(2,1fr)}.top{flex-wrap:wrap}}
 """
@@ -797,12 +808,13 @@ def index(f: str = "all"):
 <div><span class="name">{E(r.get('name') or 'بدون اسم')}</span> <span class="ph">+{E(r['phone'])}</span>{_badges(r)}</div>
 <div class="meta">{_local(r['last'])} · {r['n']} رسالة</div></div>
 <div class="facts">{INTENTS.get(r.get('intent') or '', '-')} — {_facts(r)}</div></a>""" for r in shown)
-    body = f"""<header><h1>عملاء تطوير<small>بوت الواتساب</small></h1>
-<a class="btn gold" href="/dashboard/leads.csv">تنزيل Excel</a></header>
+    body = f"""<header><h1>{E(config.get()['name'])}<small>عملاء بوت الواتساب</small></h1>
+<div class="actions" style="margin:0"><a class="btn" href="/dashboard/settings">⚙ الإعدادات</a>
+<a class="btn gold" href="/dashboard/leads.csv">تنزيل Excel</a></div></header>
 <div class="stats">{''.join(f'<div class="stat"><b>{n}</b><span>{t}</span></div>' for n, t in stats)}</div>
 <nav class="tabs">{''.join(f'<a href="?f={k}" class="{"on" if k == f else ""}">{v}</a>' for k, v in FILTERS.items())}</nav>
 {items or '<div class="empty">مفيش عملاء هنا</div>'}"""
-    return _page("عملاء تطوير", body, refresh=True)
+    return _page(config.get()["name"], body, refresh=True)
 
 
 @router.get("/lead/{phone}", response_class=HTMLResponse, dependencies=[Depends(auth)])
@@ -863,6 +875,48 @@ def export_csv():
                     _local(r.get("first_seen")), _local(r["last"]), r["n"]])
     return Response("﻿" + buf.getvalue(), media_type="text/csv; charset=utf-8",
                     headers={"Content-Disposition": 'attachment; filename="tatweer-leads.csv"'})
+
+
+HINTS = {
+    "name": "بيظهر للعميل في كلام البوت وفي أول اللوحة",
+    "phone": "الرقم الوحيد اللي البوت مسموح يكتبه للعميل — أي رقم تاني بيتشال تلقائي",
+    "area_context": "اكتب بالعامية: الشركة شغالة فين، وإيه المشاريع، وإيه اللي البوت يعتبره كفاية ومايسألش عنه",
+    "extra_rules": "كل سطر تعليمة، مثال: - لو العميل سأل عن الإيجار قوله إن عندنا شقق إيجار في الحي الأول",
+}
+
+
+def _settings_page(values: dict, msg: str = "", errors: list | None = None) -> HTMLResponse:
+    fields = ""
+    for k, label in config.FIELDS.items():
+        v = E(values.get(k) or "")
+        ctl = (f'<input name="{k}" value="{v}" dir="{"ltr" if k == "phone" else "rtl"}">' if k in ("name", "phone")
+               else f'<textarea name="{k}">{v}</textarea>')
+        fields += f'<label>{label}<span class="hint">{HINTS[k]}</span></label>{ctl}'
+    note = (f'<div class="ok">{msg}</div>' if msg else "") + \
+           "".join(f'<div class="err">{E(e)}</div>' for e in (errors or []))
+    body = f"""<header><h1>الإعدادات<small>بيانات المكتب اللي البوت بيتكلم بيها</small></h1>
+<a class="btn" href="/dashboard">→ رجوع</a></header>{note}
+<form method="post" class="card">{fields}
+<div class="actions"><button class="btn g">حفظ</button></div>
+<div class="hint">التعديل بيشتغل على طول من أول رسالة جاية — من غير restart.</div></form>"""
+    return _page("الإعدادات", body)
+
+
+@router.get("/settings", response_class=HTMLResponse, dependencies=[Depends(auth)])
+def settings_form(saved: int = 0):
+    return _settings_page(config.get(), "✔ اتحفظ" if saved else "")
+
+
+@router.post("/settings", response_class=HTMLResponse, dependencies=[Depends(auth)])
+async def settings_save(request: Request):
+    _check_origin(request)
+    form = {k: v[0] for k, v in parse_qs((await request.body()).decode("utf-8"), keep_blank_values=True).items()}
+    new = {k: form.get(k, "") for k in config.FIELDS}
+    errors = config.validate(new)
+    if errors:
+        return _settings_page(new, errors=errors)
+    config.save(new)
+    return RedirectResponse("/dashboard/settings?saved=1", status_code=303)
 
 __EOF_TATWEER__
 
@@ -967,6 +1021,72 @@ async def loop() -> None:
         except Exception:
             log.exception("daily task failed")
         await asyncio.sleep(60)
+
+__EOF_TATWEER__
+
+cat > config.py <<'__EOF_TATWEER__'
+"""
+إعدادات المكتب (بتتعدل من لوحة العملاء ← الإعدادات) — محفوظة في /data/office.json.
+أي مكتب جديد: نفس الكود، بس الإعدادات دي بتتغير.
+"""
+import json
+import os
+import re
+
+PATH = os.path.join(os.path.dirname(os.getenv("LEADS_FILE", "leads.json")) or ".", "office.json")
+
+DEFAULTS = {
+    "name": os.getenv("COMPANY_NAME", "تطوير للخدمات العقارية"),
+    "phone": os.getenv("COMPANY_PHONE", ""),
+    "area_context": ('الشركة شغالة في "مدينة الفردوس للقوات المسلحة" في 6 أكتوبر (الجيزة). '
+                     'لو العميل قال "الفردوس" أو شارع جوه الفردوس، ده كفاية — متسألش عن المدينة أو المحافظة.'),
+    "extra_rules": "",
+}
+FIELDS = {
+    "name": "اسم الشركة",
+    "phone": "رقم الشركة اللي البوت يديه للعملاء",
+    "area_context": "المناطق والمشاريع اللي الشركة شغالة فيها",
+    "extra_rules": "تعليمات إضافية للبوت (اختياري)",
+}
+PHONE_RE = re.compile(r"^(?:\+?20|0)1[0125]\d{8}$")
+
+_cache: dict | None = None
+
+
+def get() -> dict:
+    global _cache
+    if _cache is None:
+        data = dict(DEFAULTS)
+        try:
+            with open(PATH, encoding="utf-8") as f:
+                data.update({k: v for k, v in json.load(f).items() if k in DEFAULTS})
+        except (FileNotFoundError, ValueError):
+            pass
+        _cache = data
+    return _cache
+
+
+def validate(new: dict) -> list[str]:
+    errors = []
+    if not (new.get("name") or "").strip():
+        errors.append("اسم الشركة مطلوب")
+    phone = re.sub(r"[\s\-]", "", new.get("phone") or "")
+    if phone and not PHONE_RE.match(phone):
+        errors.append("رقم الشركة لازم يكون موبايل مصري صحيح (مثال: 01064753335)")
+    if len(new.get("area_context") or "") > 3000 or len(new.get("extra_rules") or "") > 3000:
+        errors.append("النص طويل أوي (الحد ٣٠٠٠ حرف)")
+    return errors
+
+
+def save(new: dict) -> None:
+    global _cache
+    data = {k: (new.get(k) or "").strip() for k in DEFAULTS}
+    data["phone"] = re.sub(r"[\s\-]", "", data["phone"])
+    tmp = PATH + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
+    os.replace(tmp, PATH)
+    _cache = data
 
 __EOF_TATWEER__
 
