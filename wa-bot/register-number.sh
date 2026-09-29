@@ -12,25 +12,34 @@ while true; do
   PNID=$(echo "${PNID:-1382569334934160}" | tr -d ' \r')
   [[ "$PNID" =~ ^[0-9]{13,17}$ ]] && break || echo "   ⚠️ ده مش Phone Number ID (رقم طويل 15-16 خانة، مش رقم الموبايل). دوس Enter بس."
 done
-read -rp "WhatsApp Business Account ID [Enter = 1143578425129739]: " WABA < /dev/tty; WABA=$(echo "${WABA:-1143578425129739}" | tr -d ' \r')
+while true; do
+  read -rp "WhatsApp Business Account ID [Enter = 1143578425129739]: " WABA < /dev/tty
+  WABA=$(echo "${WABA:-1143578425129739}" | tr -d ' \r')
+  [[ "$WABA" =~ ^[0-9]{13,17}$ ]] && break || echo "   ⚠️ دوس Enter بس"
+done
 echo "==> الرقم ده في ميتا:"
 curl -sS "$G/$PNID?fields=display_phone_number,verified_name,name_status,code_verification_status,quality_rating" -H "Authorization: Bearer $TOK"; echo
 read -rp "ده الرقم الصح (01043392721)؟ (y/n): " OK < /dev/tty; [ "$OK" = "y" ] || exit 1
 
 STATUS=$(curl -sS "$G/$PNID?fields=code_verification_status" -H "Authorization: Bearer $TOK" | python3 -c 'import sys,json;print(json.load(sys.stdin).get("code_verification_status",""))' 2>/dev/null || true)
 if [ "$STATUS" != "VERIFIED" ]; then
-  echo "==> الرقم لسه متأكدش — ببعت كود تأكيد SMS على 01043392721"
-  curl -sS -X POST "$G/$PNID/request_code" -H "Authorization: Bearer $TOK" \
-    --data-urlencode "code_method=SMS" --data-urlencode "language=ar"; echo
+  echo "==> الرقم لسه متأكدش"
+  read -rp "لو وصلك كود SMS في آخر ١٠ دقايق اكتبه، أو دوس Enter عشان أبعتلك كود جديد: " CODE < /dev/tty
+  CODE=$(echo "$CODE" | tr -cd '0-9voice')
   while true; do
-    read -rp "اكتب الكود اللي وصلك في الرسالة (أو اكتب voice لو عايز مكالمة بدل SMS): " CODE < /dev/tty
-    CODE=$(echo "$CODE" | tr -d ' -\r')
-    if [ "$CODE" = "voice" ]; then
+    if [ -z "$CODE" ] || [ "$CODE" = "voice" ]; then
+      M=SMS; [ "$CODE" = "voice" ] && M=VOICE
+      echo "   ببعت كود ($M) على 01043392721..."
       curl -sS -X POST "$G/$PNID/request_code" -H "Authorization: Bearer $TOK" \
-        --data-urlencode "code_method=VOICE" --data-urlencode "language=ar"; echo; continue
+        --data-urlencode "code_method=$M" --data-urlencode "language=ar"; echo
+      read -rp "اكتب الكود (أو voice لمكالمة): " CODE < /dev/tty
+      CODE=$(echo "$CODE" | tr -cd '0-9voice')
+      continue
     fi
     V=$(curl -sS -X POST "$G/$PNID/verify_code" -H "Authorization: Bearer $TOK" --data-urlencode "code=$CODE"); echo "$V"
-    echo "$V" | grep -q '"success":true' && break || echo "   ⚠️ الكود ماتقبلش — جرّب تاني"
+    echo "$V" | grep -q '"success":true' && break
+    read -rp "   ⚠️ الكود ماتقبلش — اكتبه تاني، أو دوس Enter لكود جديد: " CODE < /dev/tty
+    CODE=$(echo "$CODE" | tr -cd '0-9voice')
   done
   echo "✔ الرقم اتأكد"
 fi
