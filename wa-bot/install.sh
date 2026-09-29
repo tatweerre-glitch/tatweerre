@@ -228,7 +228,7 @@ class _History:
     """آخر ١٠ رسائل لكل عميل — بتتقري وتتكتب في قاعدة البيانات."""
     def __getitem__(self, phone):
         rows = _db.execute(
-            "SELECT role, content FROM (SELECT id, role, content FROM messages WHERE phone=? ORDER BY id DESC LIMIT 10) ORDER BY id",
+            "SELECT role, content FROM (SELECT id, role, content FROM messages WHERE phone=? ORDER BY id DESC LIMIT 20) ORDER BY id",
             (phone,)).fetchall()
         return _Hist(phone, rows)
 
@@ -285,6 +285,8 @@ ROUTER_PROMPT = """أنت planner-router في نظام وكلاء لشركة ع�
   "budget": "المبلغ لو اتذكر أو null",
   "area_m2": "المساحة لو اتذكرت أو null",
   "location": "المنطقة لو اتذكرت أو null",
+  "payment": "كاش أو تقسيط لو اتذكر أو null",
+  "rooms": "عدد الأوض لو اتذكر أو null",
   "needs_human": true | false,
   "missing_info": ["الحاجات الناقصة عشان نأهل العميل، مثلا: الميزانية، المساحة، طريقة الدفع"]
 }
@@ -306,7 +308,7 @@ async def planner_router(phone: str, text: str) -> dict:
     history = "\n".join(f"{r}: {m}" for r, m in HISTORY[phone])
     resp = await client.messages.create(
         model=MODEL,
-        max_tokens=400,
+        max_tokens=2000,
         system=ROUTER_PROMPT,
         messages=[{"role": "user", "content": f"المحادثة السابقة:\n{history or '(مفيش)'}\n\nالرسالة الجديدة:\n{text}"}],
     )
@@ -318,6 +320,18 @@ async def planner_router(phone: str, text: str) -> dict:
         return {"intent": "other", "qualification": "cold", "needs_human": False, "missing_info": []}
 
 
+def _known_facts(phone: str, routing: dict) -> str:
+    """المعلومات المتسجلة عن العميل (من قاعدة البيانات + الرسالة الحالية)."""
+    lead = dict(LEADS.get(phone, {}))
+    lead.update({k: v for k, v in routing.items() if v and k in ("budget", "area_m2", "location", "payment", "rooms")})
+    labels = {"budget": "الميزانية", "area_m2": "المساحة", "location": "المنطقة", "payment": "طريقة الدفع", "rooms": "عدد الأوض"}
+    parts = [f"{labels[k]}: {lead[k]}" for k in labels if lead.get(k)]
+    return "، ".join(parts) or "مفيش"
+
+
+FALLBACK_REPLY = "تمام، وصلتني 👍 زميلي من الشركة هيتابع معاك في أقرب وقت."
+
+
 async def real_estate_agent(phone: str, name: str, text: str, routing: dict) -> str:
     msgs = []
     for role, content in HISTORY[phone]:
@@ -325,7 +339,8 @@ async def real_estate_agent(phone: str, name: str, text: str, routing: dict) -> 
     note = (
         f"[معلومات داخلية من الـ router — متذكرهاش للعميل: اسم العميل: {name or 'غير معروف'}، "
         f"النية: {routing.get('intent')}، التأهيل: {routing.get('qualification')}، "
-        f"الناقص: {', '.join(routing.get('missing_info') or []) or 'مفيش'}]\n\n{text}"
+        f"الناقص: {', '.join(routing.get('missing_info') or []) or 'مفيش'}، "
+        f"اللي العميل قاله قبل كده ومتسجل: {_known_facts(phone, routing)} — متسألش عنه تاني]\n\n{text}"
     )
     msgs.append({"role": "user", "content": note})
     # الـ API محتاج المحادثة تبدأ بـ user ويتبادلوا — ننضف أي تكرار
@@ -337,7 +352,7 @@ async def real_estate_agent(phone: str, name: str, text: str, routing: dict) -> 
             cleaned.append(m)
     if cleaned[0]["role"] != "user":
         cleaned.pop(0)
-    resp = await client.messages.create(model=MODEL, max_tokens=500, system=AGENT_PROMPT, messages=cleaned)
+    resp = await client.messages.create(model=MODEL, max_tokens=3000, system=AGENT_PROMPT, messages=cleaned)
     return _clean_phones(_text(resp))
 
 
@@ -351,7 +366,7 @@ async def crm_publisher(phone: str, name: str, routing: dict, from_ad: bool) -> 
         "qualification": routing.get("qualification"),
         "needs_human": routing.get("needs_human", False),
     })
-    for key in ("budget", "area_m2", "location"):
+    for key in ("budget", "area_m2", "location", "payment", "rooms"):
         if routing.get(key):
             lead[key] = routing[key]
     LEADS.save(phone)
@@ -363,6 +378,12 @@ async def handle_message(phone: str, name: str, text: str, from_ad: bool = False
     """نقطة الدخول: رسالة واحدة ← رد واحد."""
     routing = await planner_router(phone, text)
     reply = await real_estate_agent(phone, name, text, routing)
+    if not reply:
+        # الرد طلع فاضي — نرد رد آمن ونبلّغ الفريق بدل ما العميل يستنى
+        import logging
+        logging.getLogger("wa-bot").warning("empty reply for %s — using fallback", phone)
+        reply = FALLBACK_REPLY
+        routing["needs_human"] = True
     HISTORY[phone].append(("عميل", text))
     HISTORY[phone].append(("وكيل", reply))
     await crm_publisher(phone, name, routing, from_ad)
