@@ -3,6 +3,7 @@
 docker exec -i tatweer-wa-bot python - <<'PY'
 import sqlite3, json
 db = sqlite3.connect("/data/bot.db")
+print("عدد العملاء:", db.execute("SELECT COUNT(*) FROM leads").fetchone()[0], "| عدد الرسايل:", db.execute("SELECT COUNT(*) FROM messages").fetchone()[0])
 for phone, data, upd in db.execute("SELECT phone, data, updated FROM leads"):
     d = json.loads(data)
     print(f"\n=== {phone} ({d.get('name','')}) — آخر تحديث {upd[:16]}")
