@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # يعرض بيانات العملاء المتسجلة وآخر رسايل كل عميل
-docker exec tatweer-wa-bot python - <<'PY'
+docker exec -i tatweer-wa-bot python - <<'PY'
 import sqlite3, json
 db = sqlite3.connect("/data/bot.db")
 for phone, data, upd in db.execute("SELECT phone, data, updated FROM leads"):
