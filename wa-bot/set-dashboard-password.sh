@@ -2,7 +2,7 @@
 # يغيّر باسورد لوحة العملاء (https://bot.tatweereg.tech/dashboard — المستخدم: tatweer)
 set -e
 ENV=/opt/wa-bot/.env
-RAW=https://raw.githubusercontent.com/tatweerre-glitch/tatweerre/main/wa-bot
+RAW=${RAW:-https://raw.githubusercontent.com/tatweerre-glitch/tatweerre/main/wa-bot}
 [ -f "$ENV" ] || { echo "❌ مفيش $ENV"; exit 1; }
 while true; do
   read -rsp "اكتب باسورد جديد للوحة (8 حروف أو أكتر): " P1 < /dev/tty; echo
