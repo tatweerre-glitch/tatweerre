@@ -3,7 +3,7 @@
 # (Claude router ← الرد ← التسجيل ← تنبيه تليجرام)، وبعدين العميل الوهمي بيتمسح.
 docker exec -i tatweer-wa-bot python - <<'PY'
 import asyncio, agents
-P = "200000000000"
+P = "tatweer:200000000000"
 async def main():
     reply = await agents.handle_message(P, "عميل تجربة (اختبار التنبيه)", "السلام عليكم، عايز شقة ٣ أوض في الفردوس كاش، وعايز أكلم حد من الشركة")
     r = agents.LEADS.get(P, {})

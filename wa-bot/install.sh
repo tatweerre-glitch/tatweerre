@@ -12,6 +12,7 @@ APP_DIR=/opt/wa-bot
 mkdir -p "$APP_DIR"
 cd "$APP_DIR"
 echo "==> كتابة ملفات البوت في $APP_DIR"
+rm -f config.py
 cat > main.py <<'__EOF_TATWEER__'
 """
 Webhook واتساب — يستقبل رسايل العملاء من Meta ويوزعها على الوكلاء.
@@ -33,6 +34,7 @@ import agents  # noqa: E402
 import daily  # noqa: E402
 import dashboard  # noqa: E402
 import followup  # noqa: E402
+import offices  # noqa: E402
 import whatsapp  # noqa: E402
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
@@ -94,16 +96,23 @@ async def receive(request: Request, background: BackgroundTasks):
 
 async def process(msg: dict):
     try:
-        await whatsapp.mark_read(msg["id"])
+        office = offices.by_pnid(msg.get("pnid"))
+        if not office:
+            log.warning("message on unknown WhatsApp number %s — no office configured, ignored", msg.get("pnid"))
+            return
+        o = offices.get(office)
+        pnid, token = o["phone_number_id"], o["access_token"]
+        await whatsapp.mark_read(msg["id"], pnid, token)
         if msg["type"] not in ("text", "button", "interactive"):
             await whatsapp.send_text(
                 msg["from"],
                 "وصلتني رسالتك 🙏 ممكن تكتبلي طلبك كتابة عشان أقدر أساعدك أسرع؟",
+                pnid, token,
             )
             return
-        log.info("msg from %s (ad=%s): %s", msg["from"], msg["from_ad"], msg["text"])
-        reply = await agents.handle_message(msg["from"], msg["name"], msg["text"], msg["from_ad"])
-        await whatsapp.send_text(msg["from"], reply)
+        log.info("[%s] msg from %s (ad=%s): %s", office, msg["from"], msg["from_ad"], msg["text"])
+        reply = await agents.handle_message(offices.key(office, msg["from"]), msg["name"], msg["text"], msg["from_ad"])
+        await whatsapp.send_text(msg["from"], reply, pnid, token)
     except Exception:
         log.exception("failed processing message %s", msg.get("id"))
 
@@ -149,6 +158,7 @@ def extract_messages(payload: dict) -> list[dict]:
                 c.get("wa_id"): c.get("profile", {}).get("name", "")
                 for c in value.get("contacts", [])
             }
+            pnid = (value.get("metadata") or {}).get("phone_number_id")
             for msg in value.get("messages", []):
                 mtype = msg.get("type")
                 if mtype == "text":
@@ -170,13 +180,23 @@ def extract_messages(payload: dict) -> list[dict]:
                     # referral موجود لو العميل جاي من إعلان Click-to-WhatsApp
                     "from_ad": "referral" in msg,
                     "ad_info": msg.get("referral"),
+                    # رقم الواتساب اللي الرسالة وصلت عليه ← بيحدد المكتب
+                    "pnid": pnid,
                 })
     return out
 
 
-async def send_text(to: str, body: str) -> dict:
+def _url(pnid: str | None) -> str:
+    return f"https://graph.facebook.com/{GRAPH_VERSION}/{pnid or PHONE_NUMBER_ID}/messages"
+
+
+def _auth(token: str | None) -> dict:
+    return {"Authorization": f"Bearer {token or ACCESS_TOKEN}"}
+
+
+async def send_text(to: str, body: str, pnid: str | None = None, token: str | None = None) -> dict:
     """يبعت رسالة نصية للعميل (مسموح بيها جوه نافذة الـ 24 ساعة)."""
-    url = f"https://graph.facebook.com/{GRAPH_VERSION}/{PHONE_NUMBER_ID}/messages"
+    url = _url(pnid)
     payload = {
         "messaging_product": "whatsapp",
         "to": to,
@@ -184,30 +204,31 @@ async def send_text(to: str, body: str) -> dict:
         "text": {"body": body[:4096]},
     }
     async with httpx.AsyncClient(timeout=20) as client:
-        r = await client.post(url, json=payload, headers={"Authorization": f"Bearer {ACCESS_TOKEN}"})
+        r = await client.post(url, json=payload, headers=_auth(token))
         r.raise_for_status()
         return r.json()
 
 
-async def send_template(to: str, name: str, lang: str, body_params: list[str]) -> dict:
+async def send_template(to: str, name: str, lang: str, body_params: list[str],
+                        pnid: str | None = None, token: str | None = None) -> dict:
     """يبعت Template معتمد من ميتا (الطريقة الوحيدة المسموحة بعد ما نافذة الـ 24 ساعة تقفل)."""
-    url = f"https://graph.facebook.com/{GRAPH_VERSION}/{PHONE_NUMBER_ID}/messages"
+    url = _url(pnid)
     template = {"name": name, "language": {"code": lang}}
     if body_params:
         template["components"] = [{"type": "body", "parameters": [{"type": "text", "text": p} for p in body_params]}]
     payload = {"messaging_product": "whatsapp", "to": to, "type": "template", "template": template}
     async with httpx.AsyncClient(timeout=20) as client:
-        r = await client.post(url, json=payload, headers={"Authorization": f"Bearer {ACCESS_TOKEN}"})
+        r = await client.post(url, json=payload, headers=_auth(token))
         r.raise_for_status()
         return r.json()
 
 
-async def mark_read(message_id: str) -> None:
+async def mark_read(message_id: str, pnid: str | None = None, token: str | None = None) -> None:
     """يعلّم الرسالة كمقروءة (علامتين زرق) — بيدي انطباع احترافي."""
-    url = f"https://graph.facebook.com/{GRAPH_VERSION}/{PHONE_NUMBER_ID}/messages"
+    url = _url(pnid)
     payload = {"messaging_product": "whatsapp", "status": "read", "message_id": message_id}
     async with httpx.AsyncClient(timeout=10) as client:
-        await client.post(url, json=payload, headers={"Authorization": f"Bearer {ACCESS_TOKEN}"})
+        await client.post(url, json=payload, headers=_auth(token))
 
 __EOF_TATWEER__
 
@@ -230,7 +251,7 @@ from datetime import datetime
 from anthropic import AsyncAnthropic
 
 MODEL = os.getenv("CLAUDE_MODEL", "claude-sonnet-5-5")
-import config
+import offices
 
 client = AsyncAnthropic()  # بياخد ANTHROPIC_API_KEY من البيئة
 
@@ -243,7 +264,11 @@ _db.executescript("""
 CREATE TABLE IF NOT EXISTS messages (id INTEGER PRIMARY KEY, phone TEXT, role TEXT, content TEXT, ts TEXT);
 CREATE INDEX IF NOT EXISTS idx_messages_phone ON messages(phone, id);
 CREATE TABLE IF NOT EXISTS leads (phone TEXT PRIMARY KEY, data TEXT, updated TEXT);
+CREATE TABLE IF NOT EXISTS followups (phone TEXT, kind TEXT, sent_ts TEXT, PRIMARY KEY (phone, kind));
 """)
+# ترحيل: قبل تعدد المكاتب المفتاح كان رقم العميل بس ← بقى "<office>:<رقم العميل>"
+for _t in ("messages", "leads", "followups"):
+    _db.execute(f"UPDATE {_t} SET phone = ? || ':' || phone WHERE instr(phone, ':') = 0", (offices.DEFAULT,))
 _db.commit()
 
 
@@ -272,6 +297,9 @@ class _Hist(list):
 class _Leads(dict):
     def __init__(self):
         super().__init__({p: json.loads(d) for p, d in _db.execute("SELECT phone, data FROM leads")})
+        for k, lead in self.items():  # بيانات قديمة: نضيف المكتب ورقم العميل الحقيقي
+            lead.setdefault("office", offices.split(k)[0])
+            lead["phone"] = offices.split(k)[1]
 
     def save(self, phone):
         _db.execute("INSERT OR REPLACE INTO leads(phone, data, updated) VALUES (?,?,?)",
@@ -292,9 +320,9 @@ import re as _re
 _PHONE_RE = _re.compile(r"(?:\+?20|0)1[0125][\s\-]?\d{3,4}[\s\-]?\d{4}")
 
 
-def _clean_phones(reply: str) -> str:
+def _clean_phones(reply: str, company_phone: str = "") -> str:
     """شبكة أمان: أي رقم موبايل مصري في الرد غير رقم الشركة بيتشال."""
-    allowed = _re.sub(r"\D", "", config.get()["phone"])[-10:]
+    allowed = _re.sub(r"\D", "", company_phone)[-10:]
     def fix(m):
         return m.group(0) if allowed and _re.sub(r"\D", "", m.group(0))[-10:] == allowed else "نفس الرقم ده"
     return _PHONE_RE.sub(fix, reply)
@@ -317,9 +345,9 @@ ROUTER_PROMPT = """أنت planner-router في نظام وكلاء لشركة ع�
 hot = عنده ميزانية وجاهز يعاين قريب. warm = مهتم بس ناقص معلومات. cold = استفسار عام.
 needs_human = true لو العميل طلب يكلم حد، أو فيه شكوى، أو جاهز يدفع/يعاين."""
 
-def agent_prompt() -> str:
+def agent_prompt(office: str = offices.DEFAULT) -> str:
     """تعليمات البوت — بتتبني من إعدادات المكتب (لوحة العملاء ← الإعدادات) في كل رسالة."""
-    c = config.get()
+    c = offices.get(office)
     phone = c["phone"]
     extra = f"\n{c['extra_rules']}" if c.get("extra_rules") else ""
     return f"""أنت real-estate-agent، مساعد مبيعات في شركة "{c['name']}" بترد على العملاء على واتساب.
@@ -384,13 +412,15 @@ async def real_estate_agent(phone: str, name: str, text: str, routing: dict) -> 
             cleaned.append(m)
     if cleaned[0]["role"] != "user":
         cleaned.pop(0)
-    resp = await client.messages.create(model=MODEL, max_tokens=3000, system=agent_prompt(), messages=cleaned)
-    return _clean_phones(_text(resp))
+    office = offices.split(phone)[0]
+    resp = await client.messages.create(model=MODEL, max_tokens=3000, system=agent_prompt(office), messages=cleaned)
+    return _clean_phones(_text(resp), offices.get(office)["phone"])
 
 
 async def crm_publisher(phone: str, name: str, routing: dict, from_ad: bool) -> None:
     """يسجل/يحدث بيانات العميل. حاليًا في الذاكرة + ملف JSON — بعدين نربطه بالـ CRM/التطبيق."""
-    lead = LEADS.setdefault(phone, {"phone": phone, "first_seen": datetime.now().isoformat(), "from_ad": from_ad})
+    office, real = offices.split(phone)
+    lead = LEADS.setdefault(phone, {"phone": real, "office": office, "first_seen": datetime.now().isoformat(), "from_ad": from_ad})
     lead.update({
         "name": name or lead.get("name", ""),
         "last_seen": datetime.now().isoformat(),
@@ -420,7 +450,7 @@ def _should_notify(phone: str, every_sec: int = 6 * 3600) -> bool:
 
 
 async def handle_message(phone: str, name: str, text: str, from_ad: bool = False) -> str:
-    """نقطة الدخول: رسالة واحدة ← رد واحد."""
+    """نقطة الدخول: رسالة واحدة ← رد واحد. phone هنا هو مفتاح العميل "<office>:<رقم>"."""
     import followup
     followup.on_customer_message(phone, text)
     routing = await planner_router(phone, text)
@@ -440,17 +470,13 @@ async def handle_message(phone: str, name: str, text: str, from_ad: bool = False
     return reply
 
 
-async def notify_team(phone: str, name: str, text: str, routing: dict) -> None:
-    """ينبّه الفريق على تليجرام لما عميل يحتاج موظف (بيستخدم البوت اللي عندك)."""
-    token, chat_id = os.getenv("TELEGRAM_BOT_TOKEN"), os.getenv("TELEGRAM_CHAT_ID")
-    if not (token and chat_id):
-        return
-    import httpx
+async def notify_team(key: str, name: str, text: str, routing: dict) -> None:
+    """ينبّه فريق المكتب على تليجرام لما عميل يحتاج موظف."""
+    office, phone = offices.split(key)
     msg = (f"🔥 عميل محتاج متابعة ({routing.get('qualification')})\n"
            f"الاسم: {name or '-'}\nالرقم: +{phone}\nواتساب: https://wa.me/{phone}\n"
-           f"النية: {routing.get('intent')}\nالطلب: {_known_facts(phone, routing)}\nآخر رسالة: {text}")
-    async with httpx.AsyncClient(timeout=10) as c:
-        await c.post(f"https://api.telegram.org/bot{token}/sendMessage", json={"chat_id": chat_id, "text": msg})
+           f"النية: {routing.get('intent')}\nالطلب: {_known_facts(key, routing)}\nآخر رسالة: {text}")
+    await offices.telegram(office, msg)
 
 __EOF_TATWEER__
 
@@ -474,6 +500,7 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 
 import agents
+import offices
 import whatsapp
 
 log = logging.getLogger("wa-bot")
@@ -491,10 +518,7 @@ ACTIVE_INTENTS = {"buy", "rent", "sell", "inquiry"}
 
 OPT_OUT_RE = re.compile(r"مش مهتم|مش عايز|متبعتليش|متبعتش|بطّ?ل ?(تبعت|رسايل)|الغ[يى] الاشتراك|\bstop\b", re.I)
 
-agents._db.executescript("""
-CREATE TABLE IF NOT EXISTS followups (phone TEXT, kind TEXT, sent_ts TEXT, PRIMARY KEY (phone, kind));
-""")
-agents._db.commit()
+# جدول followups بيتعمل في agents.py (مع الترحيل لمفاتيح المكاتب)
 
 
 # ---------- بتتنده من handle_message مع كل رسالة جديدة من العميل ----------
@@ -534,11 +558,13 @@ def is_quiet_hours(cairo_now: datetime | None = None) -> bool:
     return h >= QUIET_FROM or h < QUIET_TO
 
 
-def candidates(now: datetime | None = None) -> list[tuple[str, str, float]]:
-    """مين محتاج متابعة دلوقتي: [(phone, 'nudge1' | 'nudge2', ساعات السكوت)]."""
+def candidates(now: datetime | None = None, office: str | None = None) -> list[tuple[str, str, float]]:
+    """مين محتاج متابعة دلوقتي: [(مفتاح العميل, 'nudge1' | 'nudge2', ساعات السكوت)]."""
     now = now or datetime.now()
     out = []
     for phone, lead in list(agents.LEADS.items()):
+        if office and offices.split(phone)[0] != office:
+            continue
         if lead.get("opted_out") or lead.get("needs_human"):
             continue
         if lead.get("intent") not in ACTIVE_INTENTS:
@@ -575,21 +601,17 @@ async def _write_nudge(phone: str) -> str:
     if cleaned[0]["role"] != "user":
         cleaned.pop(0)
     try:
-        resp = await agents.client.messages.create(model=agents.MODEL, max_tokens=2000, system=agents.agent_prompt() + NUDGE_TASK, messages=cleaned)
-        text = agents._clean_phones(agents._text(resp))
+        office = offices.split(phone)[0]
+        resp = await agents.client.messages.create(model=agents.MODEL, max_tokens=2000, system=agents.agent_prompt(office) + NUDGE_TASK, messages=cleaned)
+        text = agents._clean_phones(agents._text(resp), offices.get(office)["phone"])
     except Exception:
         log.exception("nudge generation failed for %s", phone)
         text = ""
     return text or NUDGE1_FALLBACK
 
 
-async def _notify(text: str) -> None:
-    token, chat_id = os.getenv("TELEGRAM_BOT_TOKEN"), os.getenv("TELEGRAM_CHAT_ID")
-    if not (token and chat_id):
-        return
-    import httpx
-    async with httpx.AsyncClient(timeout=10) as c:
-        await c.post(f"https://api.telegram.org/bot{token}/sendMessage", json={"chat_id": chat_id, "text": text})
+async def _notify(text: str, office: str = offices.DEFAULT) -> None:
+    await offices.telegram(office, text)
 
 
 async def run_once(now: datetime | None = None, ignore_quiet: bool = False) -> list[str]:
@@ -598,26 +620,33 @@ async def run_once(now: datetime | None = None, ignore_quiet: bool = False) -> l
     if not ignore_quiet and is_quiet_hours():
         return []
     done = []
-    for phone, kind, silent_h in candidates(now):
-        lead = agents.LEADS.get(phone, {})
+    for key, kind, silent_h in candidates(now):
+        phone = key  # مفتاح العميل في قاعدة البيانات
+        lead = agents.LEADS.get(key, {})
         name = lead.get("name") or ""
+        office, to = offices.split(key)
+        o = offices.get(office)
+        template = o["followup_template"]
         try:
+            if not o["phone_number_id"]:
+                continue
             if kind == "nudge1":
-                text = await _write_nudge(phone)
-                await whatsapp.send_text(phone, text)
-                agents.HISTORY[phone].append(("وكيل", text))
-                done.append(f"{phone}: متابعة ١ اتبعتت")
-            elif TEMPLATE:
-                await whatsapp.send_template(phone, TEMPLATE, TEMPLATE_LANG, [name.split()[0] if name else "حضرتك"])
-                agents.HISTORY[phone].append(("وكيل", f"[رسالة متابعة Template: {TEMPLATE}]"))
-                done.append(f"{phone}: متابعة ٢ (Template) اتبعتت")
+                text = await _write_nudge(key)
+                await whatsapp.send_text(to, text, o["phone_number_id"], o["access_token"])
+                agents.HISTORY[key].append(("وكيل", text))
+                done.append(f"{key}: متابعة ١ اتبعتت")
+            elif template:
+                await whatsapp.send_template(to, template, TEMPLATE_LANG, [name.split()[0] if name else "حضرتك"],
+                                             o["phone_number_id"], o["access_token"])
+                agents.HISTORY[key].append(("وكيل", f"[رسالة متابعة Template: {template}]"))
+                done.append(f"{key}: متابعة ٢ (Template) اتبعتت")
             else:
                 await _notify(
                     f"⏰ عميل ساكت من {int(silent_h // 24)} أيام ومحتاج مكالمة\n"
-                    f"الاسم: {name or '-'}\nالرقم: +{phone}\nواتساب: https://wa.me/{phone}\n"
-                    f"الطلب: {agents._known_facts(phone, {})}\n"
-                    f"(البوت مش هيقدر يبعتله غير بعد اعتماد Template المتابعة من ميتا)")
-                done.append(f"{phone}: متابعة ٢ ← تنبيه تليجرام")
+                    f"الاسم: {name or '-'}\nالرقم: +{to}\nواتساب: https://wa.me/{to}\n"
+                    f"الطلب: {agents._known_facts(key, {})}\n"
+                    f"(البوت مش هيقدر يبعتله غير بعد اعتماد Template المتابعة من ميتا)", office)
+                done.append(f"{key}: متابعة ٢ ← تنبيه تليجرام")
             _mark(phone, kind, now)
         except Exception:
             log.exception("follow-up %s failed for %s", kind, phone)
@@ -663,8 +692,8 @@ from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 
 import agents
-import config
 import followup
+import offices
 
 router = APIRouter(prefix="/dashboard")
 _basic = HTTPBasic(realm="Tatweer")
@@ -677,12 +706,13 @@ QUAL = {"hot": ("ساخن 🔥", "hot"), "warm": ("مهتم", "warm"), "cold": (
 FACTS = {"budget": "الميزانية", "area_m2": "المساحة", "location": "المنطقة", "payment": "الدفع", "rooms": "الأوض", "viewing": "المعاينة"}
 
 
-def auth(cred: HTTPBasicCredentials = Depends(_basic)) -> None:
-    pw = os.getenv("DASHBOARD_PASSWORD", "")
-    ok = pw and secrets.compare_digest(cred.username.encode(), b"tatweer") \
-        and secrets.compare_digest(cred.password.encode(), pw.encode())
-    if not ok:
+def auth(cred: HTTPBasicCredentials = Depends(_basic)) -> str:
+    """اسم المستخدم = كود المكتب (مثال: tatweer)، والباسورد = باسورد المكتب. بيرجع كود المكتب."""
+    office = cred.username.strip().lower()
+    pw = offices.get(office)["dashboard_password"] if office in offices.all_ids() else ""
+    if not (pw and secrets.compare_digest(cred.password.encode(), pw.encode())):
         raise HTTPException(401, "wrong password", headers={"WWW-Authenticate": 'Basic realm="Tatweer"'})
+    return office
 
 
 def _local(ts: str | None) -> str:
@@ -698,18 +728,22 @@ def _local(ts: str | None) -> str:
     return d.strftime("%d/%m %I:%M %p").replace("AM", "ص").replace("PM", "م")
 
 
-def _rows():
+def _rows(office: str):
+    """عملاء المكتب ده بس."""
+    like = office + ":%"
     stats = {p: (n, last) for p, n, last in agents._db.execute(
-        "SELECT phone, COUNT(*), MAX(ts) FROM messages GROUP BY phone")}
+        "SELECT phone, COUNT(*), MAX(ts) FROM messages WHERE phone LIKE ? GROUP BY phone", (like,))}
     sent = {}
-    for p, k in agents._db.execute("SELECT phone, kind FROM followups"):
+    for p, k in agents._db.execute("SELECT phone, kind FROM followups WHERE phone LIKE ?", (like,)):
         sent.setdefault(p, []).append(k)
-    due = {p: k for p, k, _ in followup.candidates()}
+    due = {p: k for p, k, _ in followup.candidates(office=office)}
     out = []
-    for phone, lead in agents.LEADS.items():
-        n, last = stats.get(phone, (0, lead.get("last_seen")))
-        out.append({**lead, "phone": phone, "n": n, "last": last or "",
-                    "sent": sent.get(phone, []), "due": due.get(phone)})
+    for key, lead in agents.LEADS.items():
+        if offices.split(key)[0] != office:
+            continue
+        n, last = stats.get(key, (0, lead.get("last_seen")))
+        out.append({**lead, "key": key, "phone": offices.split(key)[1], "n": n, "last": last or "",
+                    "sent": sent.get(key, []), "due": due.get(key)})
     out.sort(key=lambda r: r["last"], reverse=True)
     return out
 
@@ -792,9 +826,9 @@ def _facts(r: dict) -> str:
 FILTERS = {"all": "الكل", "human": "محتاج موظف", "hot": "ساخن", "fu": "عليهم متابعة"}
 
 
-@router.get("", response_class=HTMLResponse, dependencies=[Depends(auth)])
-def index(f: str = "all"):
-    rows = _rows()
+@router.get("", response_class=HTMLResponse)
+def index(f: str = "all", office: str = Depends(auth)):
+    rows = _rows(office)
     today = datetime.now(CAIRO).date()
     new_today = sum(1 for r in rows if r.get("first_seen") and
                     datetime.fromisoformat(r["first_seen"]).replace(tzinfo=UTC).astimezone(CAIRO).date() == today)
@@ -808,21 +842,22 @@ def index(f: str = "all"):
 <div><span class="name">{E(r.get('name') or 'بدون اسم')}</span> <span class="ph">+{E(r['phone'])}</span>{_badges(r)}</div>
 <div class="meta">{_local(r['last'])} · {r['n']} رسالة</div></div>
 <div class="facts">{INTENTS.get(r.get('intent') or '', '-')} — {_facts(r)}</div></a>""" for r in shown)
-    body = f"""<header><h1>{E(config.get()['name'])}<small>عملاء بوت الواتساب</small></h1>
+    body = f"""<header><h1>{E(offices.get(office)['name'])}<small>عملاء بوت الواتساب</small></h1>
 <div class="actions" style="margin:0"><a class="btn" href="/dashboard/settings">⚙ الإعدادات</a>
 <a class="btn gold" href="/dashboard/leads.csv">تنزيل Excel</a></div></header>
 <div class="stats">{''.join(f'<div class="stat"><b>{n}</b><span>{t}</span></div>' for n, t in stats)}</div>
 <nav class="tabs">{''.join(f'<a href="?f={k}" class="{"on" if k == f else ""}">{v}</a>' for k, v in FILTERS.items())}</nav>
 {items or '<div class="empty">مفيش عملاء هنا</div>'}"""
-    return _page(config.get()["name"], body, refresh=True)
+    return _page(offices.get(office)["name"], body, refresh=True)
 
 
-@router.get("/lead/{phone}", response_class=HTMLResponse, dependencies=[Depends(auth)])
-def lead(phone: str):
-    r = next((x for x in _rows() if x["phone"] == phone), None)
+@router.get("/lead/{phone}", response_class=HTMLResponse)
+def lead(phone: str, office: str = Depends(auth)):
+    r = next((x for x in _rows(office) if x["phone"] == phone), None)
     if not r:
         raise HTTPException(404)
-    msgs = agents._db.execute("SELECT role, content, ts FROM messages WHERE phone=? ORDER BY id", (phone,)).fetchall()
+    msgs = agents._db.execute("SELECT role, content, ts FROM messages WHERE phone=? ORDER BY id",
+                              (r["key"],)).fetchall()
     chat = "".join(f'<div class="msg {"c" if role == "عميل" else "a"}">{E(c)}<small>{"العميل" if role == "عميل" else "البوت"} · {_local(ts)}</small></div>'
                    for role, c, ts in msgs)
     kv = "".join(f"<div><span>{v}</span>{E(str(r.get(k) or '-'))}</div>" for k, v in FACTS.items())
@@ -842,33 +877,35 @@ def lead(phone: str):
     return _page(r.get("name") or phone, body)
 
 
-@router.post("/lead/{phone}/handled", dependencies=[Depends(auth)])
-def handled(phone: str, request: Request):
+@router.post("/lead/{phone}/handled")
+def handled(phone: str, request: Request, office: str = Depends(auth)):
     _check_origin(request)
-    lead = agents.LEADS.get(phone)
+    key = offices.key(office, phone)
+    lead = agents.LEADS.get(key)
     if lead is not None:
         lead["needs_human"] = False
         lead["handled_at"] = datetime.utcnow().isoformat()
-        agents.LEADS.save(phone)
+        agents.LEADS.save(key)
     return RedirectResponse(f"/dashboard/lead/{phone}", status_code=303)
 
 
-@router.post("/lead/{phone}/followup", dependencies=[Depends(auth)])
-def toggle_followup(phone: str, request: Request):
+@router.post("/lead/{phone}/followup")
+def toggle_followup(phone: str, request: Request, office: str = Depends(auth)):
     _check_origin(request)
-    lead = agents.LEADS.get(phone)
+    key = offices.key(office, phone)
+    lead = agents.LEADS.get(key)
     if lead is not None:
         lead["opted_out"] = not lead.get("opted_out", False)
-        agents.LEADS.save(phone)
+        agents.LEADS.save(key)
     return RedirectResponse(f"/dashboard/lead/{phone}", status_code=303)
 
 
-@router.get("/leads.csv", dependencies=[Depends(auth)])
-def export_csv():
+@router.get("/leads.csv")
+def export_csv(office: str = Depends(auth)):
     buf = io.StringIO()
     w = csv.writer(buf)
     w.writerow(["الاسم", "الرقم", "النية", "التأهيل", *FACTS.values(), "محتاج موظف", "من إعلان", "أول تواصل", "آخر نشاط", "عدد الرسايل"])
-    for r in _rows():
+    for r in _rows(office):
         w.writerow([r.get("name", ""), "+" + r["phone"], INTENTS.get(r.get("intent") or "", ""),
                     QUAL.get(r.get("qualification") or "", ("",))[0], *[r.get(k) or "" for k in FACTS],
                     "نعم" if r.get("needs_human") else "", "نعم" if r.get("from_ad") else "",
@@ -887,7 +924,7 @@ HINTS = {
 
 def _settings_page(values: dict, msg: str = "", errors: list | None = None) -> HTMLResponse:
     fields = ""
-    for k, label in config.FIELDS.items():
+    for k, label in offices.EDITABLE.items():
         v = E(values.get(k) or "")
         ctl = (f'<input name="{k}" value="{v}" dir="{"ltr" if k == "phone" else "rtl"}">' if k in ("name", "phone")
                else f'<textarea name="{k}">{v}</textarea>')
@@ -902,20 +939,20 @@ def _settings_page(values: dict, msg: str = "", errors: list | None = None) -> H
     return _page("الإعدادات", body)
 
 
-@router.get("/settings", response_class=HTMLResponse, dependencies=[Depends(auth)])
-def settings_form(saved: int = 0):
-    return _settings_page(config.get(), "✔ اتحفظ" if saved else "")
+@router.get("/settings", response_class=HTMLResponse)
+def settings_form(saved: int = 0, office: str = Depends(auth)):
+    return _settings_page(offices.get(office), "✔ اتحفظ" if saved else "")
 
 
-@router.post("/settings", response_class=HTMLResponse, dependencies=[Depends(auth)])
-async def settings_save(request: Request):
+@router.post("/settings", response_class=HTMLResponse)
+async def settings_save(request: Request, office: str = Depends(auth)):
     _check_origin(request)
     form = {k: v[0] for k, v in parse_qs((await request.body()).decode("utf-8"), keep_blank_values=True).items()}
-    new = {k: form.get(k, "") for k in config.FIELDS}
-    errors = config.validate(new)
+    new = {k: form.get(k, "") for k in offices.EDITABLE}
+    errors = offices.validate(new)
     if errors:
         return _settings_page(new, errors=errors)
-    config.save(new)
+    offices.save(office, new)
     return RedirectResponse("/dashboard/settings?saved=1", status_code=303)
 
 __EOF_TATWEER__
@@ -936,6 +973,7 @@ from zoneinfo import ZoneInfo
 
 import agents
 import followup
+import offices
 
 log = logging.getLogger("wa-bot")
 CAIRO, UTC = ZoneInfo("Africa/Cairo"), ZoneInfo("UTC")
@@ -963,24 +1001,25 @@ def _cairo(ts: str | None):
         return None
 
 
-def build_report(now: datetime | None = None) -> str:
+def build_report(office: str = offices.DEFAULT, now: datetime | None = None) -> str:
     now = now or datetime.now(CAIRO)
     since = now - timedelta(hours=24)
-    leads = list(agents.LEADS.values())
-    new = [l for l in leads if (_cairo(l.get("first_seen")) or now) >= since and l.get("first_seen")]
+    since_utc = since.astimezone(UTC).replace(tzinfo=None).isoformat()
+    prefix = office + ":"
+    leads = [dict(l, key=k) for k, l in agents.LEADS.items() if k.startswith(prefix)]
+    new = [l for l in leads if l.get("first_seen") and (_cairo(l["first_seen"]) or now) >= since]
     active = {p for (p,) in agents._db.execute(
-        "SELECT DISTINCT phone FROM messages WHERE role='عميل' AND ts >= ?",
-        (since.astimezone(UTC).replace(tzinfo=None).isoformat(),))}
+        "SELECT DISTINCT phone FROM messages WHERE role='عميل' AND ts >= ? AND phone LIKE ?", (since_utc, prefix + "%"))}
     human = [l for l in leads if l.get("needs_human")]
-    hot = [l for l in leads if l.get("qualification") == "hot" and l.get("phone") in active]
-    viewing = [l for l in leads if l.get("viewing") and l.get("phone") in active]
-    fu = agents._db.execute("SELECT COUNT(*) FROM followups WHERE sent_ts >= ?",
-                            (since.astimezone(UTC).replace(tzinfo=None).isoformat(),)).fetchone()[0]
+    hot = [l for l in leads if l.get("qualification") == "hot" and l["key"] in active]
+    viewing = [l for l in leads if l.get("viewing") and l["key"] in active]
+    fu = agents._db.execute("SELECT COUNT(*) FROM followups WHERE sent_ts >= ? AND phone LIKE ?",
+                            (since_utc, prefix + "%")).fetchone()[0]
 
     def line(l):
-        return f"• {l.get('name') or 'بدون اسم'} — +{l.get('phone')} — {agents._known_facts(l.get('phone'), {})}"
+        return f"• {l.get('name') or 'بدون اسم'} — +{l.get('phone')} — {agents._known_facts(l['key'], {})}"
 
-    parts = [f"☀️ تقرير بوت الواتساب — {now.strftime('%d/%m')}",
+    parts = [f"☀️ تقرير بوت الواتساب — {offices.get(office)['name']} — {now.strftime('%d/%m')}",
              f"آخر ٢٤ ساعة: {len(new)} عميل جديد · {len(active)} عميل اتكلم · {fu} متابعة اتبعتت",
              f"إجمالي العملاء: {len(leads)}"]
     if human:
@@ -1015,60 +1054,148 @@ async def loop() -> None:
         try:
             if (now.hour, now.minute) >= (3, 0) and _claim("backup", day):
                 log.info("daily: backup → %s", backup(now))
-            if (now.hour, now.minute) >= (hh, mm) and now.hour < 22 and _claim("report", day):
-                await followup._notify(build_report(now))
-                log.info("daily: report sent")
+            if (now.hour, now.minute) >= (hh, mm) and now.hour < 22:
+                for office in offices.all_ids():
+                    if _claim(f"report:{office}", day):
+                        await offices.telegram(office, build_report(office, now))
+                        log.info("daily: report sent to %s", office)
         except Exception:
             log.exception("daily task failed")
         await asyncio.sleep(60)
 
 __EOF_TATWEER__
 
-cat > config.py <<'__EOF_TATWEER__'
+cat > offices.py <<'__EOF_TATWEER__'
 """
-إعدادات المكتب (بتتعدل من لوحة العملاء ← الإعدادات) — محفوظة في /data/office.json.
-أي مكتب جديد: نفس الكود، بس الإعدادات دي بتتغير.
+المكاتب (العملاء اللي مشتركين في البوت) — بوت واحد بيخدم كذا مكتب.
+
+كل مكتب ليه رقم واتساب خاص بيه (phone_number_id من ميتا)، والبوت بيعرف الرسالة لمكتب مين من الرقم اللي وصلت عليه.
+الإعدادات محفوظة في /data/offices.json:
+  {"tatweer": {"name": ..., "phone": ..., "area_context": ..., "extra_rules": ...,
+               "phone_number_id": ..., "waba_id": ..., "telegram_chat_id": ...,
+               "dashboard_password": ..., "access_token": ..., "followup_template": ...}}
+
+المكتب الأساسي (tatweer) بياخد أي حاجة ناقصة من .env (زي زمان) — فالتشغيل الحالي مش بيتأثر.
+مفتاح أي عميل في قاعدة البيانات: "<office>:<رقم العميل>".
 """
 import json
 import os
 import re
 
-PATH = os.path.join(os.path.dirname(os.getenv("LEADS_FILE", "leads.json")) or ".", "office.json")
+import httpx
 
-DEFAULTS = {
-    "name": os.getenv("COMPANY_NAME", "تطوير للخدمات العقارية"),
-    "phone": os.getenv("COMPANY_PHONE", ""),
-    "area_context": ('الشركة شغالة في "مدينة الفردوس للقوات المسلحة" في 6 أكتوبر (الجيزة). '
-                     'لو العميل قال "الفردوس" أو شارع جوه الفردوس، ده كفاية — متسألش عن المدينة أو المحافظة.'),
-    "extra_rules": "",
-}
-FIELDS = {
+DATA_DIR = os.path.dirname(os.getenv("LEADS_FILE", "leads.json")) or "."
+PATH = os.path.join(DATA_DIR, "offices.json")
+DEFAULT = os.getenv("DEFAULT_OFFICE", "tatweer")
+ID_RE = re.compile(r"^[a-z0-9][a-z0-9-]{1,30}$")
+PHONE_RE = re.compile(r"^(?:\+?20|0)1[0125]\d{8}$")
+
+# الحقول اللي صاحب المكتب يعدلها من اللوحة ← الإعدادات
+EDITABLE = {
     "name": "اسم الشركة",
     "phone": "رقم الشركة اللي البوت يديه للعملاء",
     "area_context": "المناطق والمشاريع اللي الشركة شغالة فيها",
     "extra_rules": "تعليمات إضافية للبوت (اختياري)",
 }
-PHONE_RE = re.compile(r"^(?:\+?20|0)1[0125]\d{8}$")
+BLANK = {k: "" for k in (*EDITABLE, "phone_number_id", "waba_id", "telegram_chat_id",
+                         "dashboard_password", "access_token", "followup_template")}
 
-_cache: dict | None = None
+
+def _default_office() -> dict:
+    """المكتب الأساسي: إعدادات .env + office.json القديم (لو موجود من النسخة اللي فاتت)."""
+    d = dict(BLANK)
+    d.update({
+        "name": os.getenv("COMPANY_NAME", "تطوير للخدمات العقارية"),
+        "phone": os.getenv("COMPANY_PHONE", ""),
+        "area_context": ('الشركة شغالة في "مدينة الفردوس للقوات المسلحة" في 6 أكتوبر (الجيزة). '
+                         'لو العميل قال "الفردوس" أو شارع جوه الفردوس، ده كفاية — متسألش عن المدينة أو المحافظة.'),
+    })
+    try:
+        with open(os.path.join(DATA_DIR, "office.json"), encoding="utf-8") as f:
+            d.update({k: v for k, v in json.load(f).items() if k in EDITABLE})
+    except (FileNotFoundError, ValueError):
+        pass
+    return d
 
 
-def get() -> dict:
+_ENV_FALLBACK = {  # للمكتب الأساسي بس
+    "phone_number_id": "WHATSAPP_PHONE_NUMBER_ID",
+    "telegram_chat_id": "TELEGRAM_CHAT_ID",
+    "dashboard_password": "DASHBOARD_PASSWORD",
+    "access_token": "WHATSAPP_ACCESS_TOKEN",
+    "followup_template": "FOLLOWUP_TEMPLATE",
+}
+
+_cache: tuple[float, dict] | None = None
+
+
+def _load() -> dict:
+    """بيقرا الملف من جديد لو اتغير (عشان add-office.sh يشتغل من غير restart)."""
     global _cache
-    if _cache is None:
-        data = dict(DEFAULTS)
-        try:
-            with open(PATH, encoding="utf-8") as f:
-                data.update({k: v for k, v in json.load(f).items() if k in DEFAULTS})
-        except (FileNotFoundError, ValueError):
-            pass
-        _cache = data
-    return _cache
+    try:
+        mtime = os.path.getmtime(PATH)
+    except FileNotFoundError:
+        mtime = -1.0
+    if _cache is None or _cache[0] != mtime:
+        raw = {}
+        if mtime >= 0:
+            try:
+                with open(PATH, encoding="utf-8") as f:
+                    raw = json.load(f)
+            except ValueError:
+                raw = _cache[1] if _cache else {}
+        if DEFAULT not in raw:
+            raw[DEFAULT] = _default_office()
+        _cache = (mtime, raw)
+    return _cache[1]
+
+
+def all_ids() -> list[str]:
+    return list(_load())
+
+
+def get(office: str) -> dict:
+    d = dict(BLANK)
+    d.update(_load().get(office, {}))
+    if office == DEFAULT:
+        for k, env in _ENV_FALLBACK.items():
+            if not d.get(k):
+                d[k] = os.getenv(env, "")
+    if not d.get("access_token"):
+        d["access_token"] = os.getenv("WHATSAPP_ACCESS_TOKEN", "")
+    d["id"] = office
+    return d
+
+
+def by_pnid(pnid: str | None) -> str | None:
+    """المكتب صاحب رقم الواتساب ده."""
+    if not pnid:
+        return None
+    for oid in all_ids():
+        if get(oid)["phone_number_id"] == pnid:
+            return oid
+    return None
+
+
+def save(office: str, updates: dict) -> None:
+    data = _load()
+    cur = dict(data.get(office) or (_default_office() if office == DEFAULT else BLANK))
+    cur.update({k: (v or "").strip() for k, v in updates.items() if k in BLANK})
+    if "phone" in updates:
+        cur["phone"] = re.sub(r"[\s\-]", "", cur["phone"])
+    data = {**data, office: cur}
+    tmp = PATH + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
+    os.chmod(tmp, 0o600)
+    os.replace(tmp, PATH)
+    global _cache
+    _cache = None
 
 
 def validate(new: dict) -> list[str]:
     errors = []
-    if not (new.get("name") or "").strip():
+    if "name" in new and not (new.get("name") or "").strip():
         errors.append("اسم الشركة مطلوب")
     phone = re.sub(r"[\s\-]", "", new.get("phone") or "")
     if phone and not PHONE_RE.match(phone):
@@ -1078,15 +1205,24 @@ def validate(new: dict) -> list[str]:
     return errors
 
 
-def save(new: dict) -> None:
-    global _cache
-    data = {k: (new.get(k) or "").strip() for k in DEFAULTS}
-    data["phone"] = re.sub(r"[\s\-]", "", data["phone"])
-    tmp = PATH + ".tmp"
-    with open(tmp, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
-    os.replace(tmp, PATH)
-    _cache = data
+# ---- مفاتيح العملاء ----
+def key(office: str, phone: str) -> str:
+    return f"{office}:{phone}"
+
+
+def split(k: str) -> tuple[str, str]:
+    office, _, phone = k.partition(":")
+    return (office, phone) if phone else (DEFAULT, office)
+
+
+# ---- تليجرام: كل مكتب ليه جروب/شات خاص بيه ----
+async def telegram(office: str, text: str) -> None:
+    token = os.getenv("TELEGRAM_BOT_TOKEN")
+    chat = get(office)["telegram_chat_id"]
+    if not (token and chat):
+        return
+    async with httpx.AsyncClient(timeout=10) as c:
+        await c.post(f"https://api.telegram.org/bot{token}/sendMessage", json={"chat_id": chat, "text": text})
 
 __EOF_TATWEER__
 
