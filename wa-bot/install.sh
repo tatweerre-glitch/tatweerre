@@ -376,6 +376,19 @@ async def crm_publisher(phone: str, name: str, routing: dict, from_ad: bool) -> 
         json.dump(LEADS, f, ensure_ascii=False, indent=2)
 
 
+_last_notify: dict[str, float] = {}
+
+
+def _should_notify(phone: str, every_sec: int = 6 * 3600) -> bool:
+    """تنبيه واحد لكل عميل كل ٦ ساعات — عشان تليجرام مايتملاش."""
+    import time
+    now = time.time()
+    if now - _last_notify.get(phone, 0) < every_sec:
+        return False
+    _last_notify[phone] = now
+    return True
+
+
 async def handle_message(phone: str, name: str, text: str, from_ad: bool = False) -> str:
     """نقطة الدخول: رسالة واحدة ← رد واحد."""
     routing = await planner_router(phone, text)
@@ -389,7 +402,7 @@ async def handle_message(phone: str, name: str, text: str, from_ad: bool = False
     HISTORY[phone].append(("عميل", text))
     HISTORY[phone].append(("وكيل", reply))
     await crm_publisher(phone, name, routing, from_ad)
-    if routing.get("needs_human"):
+    if routing.get("needs_human") and _should_notify(phone):
         await notify_team(phone, name, text, routing)
     return reply
 
@@ -401,7 +414,8 @@ async def notify_team(phone: str, name: str, text: str, routing: dict) -> None:
         return
     import httpx
     msg = (f"🔥 عميل محتاج متابعة ({routing.get('qualification')})\n"
-           f"الاسم: {name or '-'}\nالرقم: +{phone}\nالنية: {routing.get('intent')}\nآخر رسالة: {text}")
+           f"الاسم: {name or '-'}\nالرقم: +{phone}\nواتساب: https://wa.me/{phone}\n"
+           f"النية: {routing.get('intent')}\nالطلب: {_known_facts(phone, routing)}\nآخر رسالة: {text}")
     async with httpx.AsyncClient(timeout=10) as c:
         await c.post(f"https://api.telegram.org/bot{token}/sendMessage", json={"chat_id": chat_id, "text": msg})
 
