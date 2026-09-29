@@ -82,3 +82,7 @@ WhatsApp ← Configuration ← Webhook ← Edit:
 - الرابط: https://bot.tatweereg.tech/dashboard — المستخدم `tatweer` والباسورد `DASHBOARD_PASSWORD` في `.env`.
 - تغيير الباسورد: `curl -fsSL -o p.sh https://raw.githubusercontent.com/tatweerre-glitch/tatweerre/main/wa-bot/set-dashboard-password.sh && bash p.sh`
 - فيها: كل العملاء وحالتهم، فلاتر (محتاج موظف / ساخن / عليهم متابعة)، المحادثة كاملة، زرار واتساب واتصال، "تم التواصل"، إيقاف المتابعة، وتنزيل Excel.
+
+## مهام يومية (daily.py)
+- تقرير الصبح على تليجرام الساعة ٩:٣٠ (القاهرة): عملاء آخر ٢٤ ساعة، اللي محتاجين مكالمة، ومواعيد المعاينة المطلوبة. الميعاد يتغيّر بـ `DAILY_REPORT_AT=10:00` في `.env`.
+- نسخة احتياطية من قاعدة البيانات كل ليلة في `/opt/wa-bot/data/backups` (آخر ١٤ يوم).

@@ -30,6 +30,7 @@ from fastapi import BackgroundTasks, FastAPI, HTTPException, Query, Request  # n
 from fastapi.responses import PlainTextResponse  # noqa: E402
 
 import agents  # noqa: E402
+import daily  # noqa: E402
 import dashboard  # noqa: E402
 import followup  # noqa: E402
 import whatsapp  # noqa: E402
@@ -50,6 +51,7 @@ _seen_ids: deque = deque(maxlen=2000)
 async def start_followups():
     import asyncio
     app.state.followup_task = asyncio.create_task(followup.loop())
+    app.state.daily_task = asyncio.create_task(daily.loop())
 
 
 @app.get("/health")
@@ -861,6 +863,110 @@ def export_csv():
                     _local(r.get("first_seen")), _local(r["last"]), r["n"]])
     return Response("﻿" + buf.getvalue(), media_type="text/csv; charset=utf-8",
                     headers={"Content-Disposition": 'attachment; filename="tatweer-leads.csv"'})
+
+__EOF_TATWEER__
+
+cat > daily.py <<'__EOF_TATWEER__'
+"""
+مهام يومية:
+  • تقرير الصبح على تليجرام (٩:٣٠ بتوقيت القاهرة): عملاء امبارح، الساخنين، اللي محتاجين مكالمة، ومواعيد المعاينة.
+  • نسخة احتياطية من قاعدة البيانات كل ليلة (٣ الفجر) في /data/backups — بنحتفظ بآخر ١٤ نسخة.
+"""
+import asyncio
+import glob
+import logging
+import os
+import sqlite3
+from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
+
+import agents
+import followup
+
+log = logging.getLogger("wa-bot")
+CAIRO, UTC = ZoneInfo("Africa/Cairo"), ZoneInfo("UTC")
+REPORT_AT = os.getenv("DAILY_REPORT_AT", "09:30")
+BACKUP_DIR = os.path.join(os.path.dirname(agents.DB_PATH) or ".", "backups")
+KEEP = 14
+DASH = f"https://{os.getenv('BOT_DOMAIN', 'bot.tatweereg.tech')}/dashboard"
+
+
+agents._db.execute("CREATE TABLE IF NOT EXISTS daily_runs (kind TEXT, day TEXT, PRIMARY KEY (kind, day))")
+agents._db.commit()
+
+
+def _claim(kind: str, day: str) -> bool:
+    """True مرة واحدة بس لكل مهمة في اليوم — حتى لو البوت اتعمله restart."""
+    cur = agents._db.execute("INSERT OR IGNORE INTO daily_runs(kind, day) VALUES (?,?)", (kind, day))
+    agents._db.commit()
+    return cur.rowcount == 1
+
+
+def _cairo(ts: str | None):
+    try:
+        return datetime.fromisoformat(ts).replace(tzinfo=UTC).astimezone(CAIRO)
+    except (TypeError, ValueError):
+        return None
+
+
+def build_report(now: datetime | None = None) -> str:
+    now = now or datetime.now(CAIRO)
+    since = now - timedelta(hours=24)
+    leads = list(agents.LEADS.values())
+    new = [l for l in leads if (_cairo(l.get("first_seen")) or now) >= since and l.get("first_seen")]
+    active = {p for (p,) in agents._db.execute(
+        "SELECT DISTINCT phone FROM messages WHERE role='عميل' AND ts >= ?",
+        (since.astimezone(UTC).replace(tzinfo=None).isoformat(),))}
+    human = [l for l in leads if l.get("needs_human")]
+    hot = [l for l in leads if l.get("qualification") == "hot" and l.get("phone") in active]
+    viewing = [l for l in leads if l.get("viewing") and l.get("phone") in active]
+    fu = agents._db.execute("SELECT COUNT(*) FROM followups WHERE sent_ts >= ?",
+                            (since.astimezone(UTC).replace(tzinfo=None).isoformat(),)).fetchone()[0]
+
+    def line(l):
+        return f"• {l.get('name') or 'بدون اسم'} — +{l.get('phone')} — {agents._known_facts(l.get('phone'), {})}"
+
+    parts = [f"☀️ تقرير بوت الواتساب — {now.strftime('%d/%m')}",
+             f"آخر ٢٤ ساعة: {len(new)} عميل جديد · {len(active)} عميل اتكلم · {fu} متابعة اتبعتت",
+             f"إجمالي العملاء: {len(leads)}"]
+    if human:
+        parts += ["", f"📞 محتاجين مكالمة ({len(human)}):", *[line(l) for l in human[:10]]]
+    if viewing:
+        parts += ["", "🏠 مواعيد معاينة مطلوبة:", *[f"• {l.get('name') or '-'} — +{l['phone']} — {l['viewing']}" for l in viewing[:10]]]
+    if hot and not human:
+        parts += ["", f"🔥 ساخنين ({len(hot)}):", *[line(l) for l in hot[:10]]]
+    if not (human or viewing or hot):
+        parts += ["", "مفيش حد مستني مكالمة النهاردة 👍"]
+    parts += ["", f"اللوحة: {DASH}"]
+    return "\n".join(parts)
+
+
+def backup(now: datetime | None = None) -> str:
+    os.makedirs(BACKUP_DIR, exist_ok=True)
+    path = os.path.join(BACKUP_DIR, f"bot-{(now or datetime.now(CAIRO)).strftime('%Y%m%d')}.db")
+    dst = sqlite3.connect(path)
+    agents._db.backup(dst)
+    dst.close()
+    for old in sorted(glob.glob(os.path.join(BACKUP_DIR, "bot-*.db")))[:-KEEP]:
+        os.remove(old)
+    return path
+
+
+async def loop() -> None:
+    hh, mm = map(int, REPORT_AT.split(":"))
+    log.info("daily: report at %s Cairo, backup at 03:00 → %s", REPORT_AT, BACKUP_DIR)
+    while True:
+        now = datetime.now(CAIRO)
+        day = now.strftime("%Y-%m-%d")
+        try:
+            if (now.hour, now.minute) >= (3, 0) and _claim("backup", day):
+                log.info("daily: backup → %s", backup(now))
+            if (now.hour, now.minute) >= (hh, mm) and now.hour < 22 and _claim("report", day):
+                await followup._notify(build_report(now))
+                log.info("daily: report sent")
+        except Exception:
+            log.exception("daily task failed")
+        await asyncio.sleep(60)
 
 __EOF_TATWEER__
 
