@@ -48,6 +48,11 @@ def health():
     return {"ok": True}
 
 
+@app.get("/")
+def root():
+    return {"service": "tatweer-wa-bot", "ok": True}
+
+
 @app.get("/webhook", response_class=PlainTextResponse)
 def verify_webhook(
     mode: str = Query(None, alias="hub.mode"),
@@ -196,7 +201,6 @@ cat > agents.py <<'__EOF_TATWEER__'
 """
 import json
 import os
-from collections import defaultdict, deque
 from datetime import datetime
 
 from anthropic import AsyncAnthropic
@@ -207,10 +211,53 @@ COMPANY_PHONE = os.getenv("COMPANY_PHONE", "")
 
 client = AsyncAnthropic()  # بياخد ANTHROPIC_API_KEY من البيئة
 
-# ذاكرة مؤقتة لآخر ١٠ رسائل لكل عميل.
-# ⚠️ بتتمسح لو السيرفر عمل restart — في المرحلة الجاية نبدلها بقاعدة بيانات (SQLite/Postgres).
-HISTORY: dict[str, deque] = defaultdict(lambda: deque(maxlen=10))
-LEADS: dict[str, dict] = {}
+# ---- تخزين دائم (SQLite في /data) — المحادثات والعملاء بيفضلوا بعد أي restart ----
+import sqlite3
+
+DB_PATH = os.getenv("DB_PATH", os.path.join(os.path.dirname(os.getenv("LEADS_FILE", "leads.json")) or ".", "bot.db"))
+_db = sqlite3.connect(DB_PATH, check_same_thread=False)
+_db.executescript("""
+CREATE TABLE IF NOT EXISTS messages (id INTEGER PRIMARY KEY, phone TEXT, role TEXT, content TEXT, ts TEXT);
+CREATE INDEX IF NOT EXISTS idx_messages_phone ON messages(phone, id);
+CREATE TABLE IF NOT EXISTS leads (phone TEXT PRIMARY KEY, data TEXT, updated TEXT);
+""")
+_db.commit()
+
+
+class _History:
+    """آخر ١٠ رسائل لكل عميل — بتتقري وتتكتب في قاعدة البيانات."""
+    def __getitem__(self, phone):
+        rows = _db.execute(
+            "SELECT role, content FROM (SELECT id, role, content FROM messages WHERE phone=? ORDER BY id DESC LIMIT 10) ORDER BY id",
+            (phone,)).fetchall()
+        return _Hist(phone, rows)
+
+
+class _Hist(list):
+    def __init__(self, phone, rows):
+        super().__init__(rows)
+        self.phone = phone
+
+    def append(self, item):
+        role, content = item
+        _db.execute("INSERT INTO messages(phone, role, content, ts) VALUES (?,?,?,?)",
+                    (self.phone, role, content, datetime.now().isoformat()))
+        _db.commit()
+        super().append(item)
+
+
+class _Leads(dict):
+    def __init__(self):
+        super().__init__({p: json.loads(d) for p, d in _db.execute("SELECT phone, data FROM leads")})
+
+    def save(self, phone):
+        _db.execute("INSERT OR REPLACE INTO leads(phone, data, updated) VALUES (?,?,?)",
+                    (phone, json.dumps(self[phone], ensure_ascii=False), datetime.now().isoformat()))
+        _db.commit()
+
+
+HISTORY = _History()
+LEADS = _Leads()
 
 
 def _text(resp) -> str:
@@ -293,6 +340,7 @@ async def crm_publisher(phone: str, name: str, routing: dict, from_ad: bool) -> 
     for key in ("budget", "area_m2", "location"):
         if routing.get(key):
             lead[key] = routing[key]
+    LEADS.save(phone)
     with open(os.getenv("LEADS_FILE", "leads.json"), "w", encoding="utf-8") as f:
         json.dump(LEADS, f, ensure_ascii=False, indent=2)
 
