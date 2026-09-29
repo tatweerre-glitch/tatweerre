@@ -1,0 +1,50 @@
+#!/usr/bin/env bash
+# ينقل البوت من الرقم التجريبي للرقم الحقيقي بعد ما يتضاف في WhatsApp Manager ويتأكد بكود الـ SMS.
+set -e
+ENV=/opt/wa-bot/.env
+RAW=${RAW:-https://raw.githubusercontent.com/tatweerre-glitch/tatweerre/main/wa-bot}
+[ -f "$ENV" ] || { echo "❌ البوت مش متركب"; exit 1; }
+get() { grep -m1 "^$1=" "$ENV" | cut -d= -f2-; }
+TOK=$(get WHATSAPP_ACCESS_TOKEN); G=https://graph.facebook.com/v21.0
+
+read -rp "Phone Number ID بتاع الرقم الحقيقي (من WhatsApp Manager ← Phone numbers): " PNID < /dev/tty; PNID=$(echo "$PNID" | tr -d ' \r')
+read -rp "WhatsApp Business Account ID [Enter = 1143578425129739]: " WABA < /dev/tty; WABA=$(echo "${WABA:-1143578425129739}" | tr -d ' \r')
+echo "==> الرقم ده في ميتا:"
+curl -sS "$G/$PNID?fields=display_phone_number,verified_name,name_status,code_verification_status,quality_rating" -H "Authorization: Bearer $TOK"; echo
+read -rp "ده الرقم الصح (01043392721)؟ (y/n): " OK < /dev/tty; [ "$OK" = "y" ] || exit 1
+
+while true; do
+  read -rsp "اختار PIN من 6 أرقام (Two-step verification — احفظه عندك): " PIN < /dev/tty; echo
+  [[ "$PIN" =~ ^[0-9]{6}$ ]] && break || echo "   ⚠️ لازم 6 أرقام"
+done
+echo "==> تسجيل الرقم في Cloud API"
+R=$(curl -sS -X POST "$G/$PNID/register" -H "Authorization: Bearer $TOK" -H "Content-Type: application/json" \
+  -d "{\"messaging_product\":\"whatsapp\",\"pin\":\"$PIN\"}"); echo "$R"
+echo "$R" | grep -q '"success":true' || { echo "❌ التسجيل ماتمش — ابعت الرسالة اللي فوق لـ Claude"; exit 1; }
+
+echo "==> ربط الحساب بالبوت"
+curl -sS -X POST "$G/$WABA/subscribed_apps" -H "Authorization: Bearer $TOK"; echo
+
+python3 - "$ENV" "$PNID" "$WABA" <<'PY'
+import sys
+path, pnid, waba = sys.argv[1:]
+vals = {"WHATSAPP_PHONE_NUMBER_ID": pnid, "WHATSAPP_WABA_ID": waba}
+lines = [l for l in open(path, encoding="utf-8").read().splitlines() if l.split("=", 1)[0] not in vals]
+lines += [f"{k}={v}" for k, v in vals.items()]
+open(path, "w", encoding="utf-8").write("\n".join(lines) + "\n")
+PY
+chmod 600 "$ENV"
+# لو مكتب تطوير متسجل له رقم في offices.json، نشيله عشان ياخد الرقم الجديد من .env
+python3 - <<'PY'
+import json, os
+p = "/opt/wa-bot/data/offices.json"
+if os.path.exists(p):
+    d = json.load(open(p, encoding="utf-8"))
+    if d.get("tatweer", {}).pop("phone_number_id", None) is not None:
+        json.dump(d, open(p, "w", encoding="utf-8"), ensure_ascii=False, indent=2)
+PY
+echo "==> إعادة تشغيل البوت على الرقم الجديد"
+curl -fsSL -o /root/install.sh "$RAW/install.sh" && bash /root/install.sh | tail -4
+echo
+echo "✅ البوت بقى على الرقم الحقيقي. جرّب: ابعت رسالة واتساب من موبايلك لـ 01043392721"
+echo "   مهم: الـ Template لازم يتقدّم تاني على الحساب الحقيقي — شغّل followup-template.sh تاني."

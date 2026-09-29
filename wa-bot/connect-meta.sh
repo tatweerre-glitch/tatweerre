@@ -6,7 +6,7 @@ ENV=/opt/wa-bot/.env
 get() { grep -m1 "^$1=" "$ENV" | cut -d= -f2-; }
 
 APP_ID=1556748639103978
-WABA_ID=2161026601120075
+WABA_ID=$(grep -m1 "^WHATSAPP_WABA_ID=" "$ENV" | cut -d= -f2-); WABA_ID=${WABA_ID:-2161026601120075}
 GRAPH=https://graph.facebook.com/v21.0
 URL=https://bot.tatweereg.tech/webhook
 

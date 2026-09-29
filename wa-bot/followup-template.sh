@@ -5,7 +5,7 @@ ENV=/opt/wa-bot/.env
 RAW=https://raw.githubusercontent.com/tatweerre-glitch/tatweerre/main/wa-bot
 [ -f "$ENV" ] || { echo "❌ مفيش $ENV"; exit 1; }
 export TOK=$(grep -m1 '^WHATSAPP_ACCESS_TOKEN=' "$ENV" | cut -d= -f2-)
-export WABA=${WABA_ID:-2161026601120075}
+export WABA=${WABA_ID:-$(grep -m1 "^WHATSAPP_WABA_ID=" "$ENV" | cut -d= -f2-)}; WABA=${WABA:-2161026601120075}
 export NAME=tatweer_followup
 
 python3 - <<'PY' > /tmp/tpl_status
