@@ -213,6 +213,11 @@ HISTORY: dict[str, deque] = defaultdict(lambda: deque(maxlen=10))
 LEADS: dict[str, dict] = {}
 
 
+def _text(resp) -> str:
+    """يجمع النص من الرد ويتجاهل أي بلوكات تانية (زي thinking)."""
+    return "".join(b.text for b in resp.content if getattr(b, "type", "") == "text").strip()
+
+
 ROUTER_PROMPT = """أنت planner-router في نظام وكلاء لشركة عقارات مصرية.
 مهمتك تحلل رسالة العميل وترجع JSON فقط بالشكل ده بدون أي كلام زيادة:
 {
@@ -244,7 +249,7 @@ async def planner_router(phone: str, text: str) -> dict:
         system=ROUTER_PROMPT,
         messages=[{"role": "user", "content": f"المحادثة السابقة:\n{history or '(مفيش)'}\n\nالرسالة الجديدة:\n{text}"}],
     )
-    raw = resp.content[0].text.strip()
+    raw = _text(resp)
     try:
         start, end = raw.index("{"), raw.rindex("}") + 1
         return json.loads(raw[start:end])
@@ -272,7 +277,7 @@ async def real_estate_agent(phone: str, name: str, text: str, routing: dict) -> 
     if cleaned[0]["role"] != "user":
         cleaned.pop(0)
     resp = await client.messages.create(model=MODEL, max_tokens=500, system=AGENT_PROMPT, messages=cleaned)
-    return resp.content[0].text.strip()
+    return _text(resp)
 
 
 async def crm_publisher(phone: str, name: str, routing: dict, from_ad: bool) -> None:
