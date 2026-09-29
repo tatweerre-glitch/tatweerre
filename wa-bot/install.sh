@@ -265,6 +265,18 @@ def _text(resp) -> str:
     return "".join(b.text for b in resp.content if getattr(b, "type", "") == "text").strip()
 
 
+import re as _re
+_PHONE_RE = _re.compile(r"(?:\+?20|0)1[0125][\s\-]?\d{3,4}[\s\-]?\d{4}")
+
+
+def _clean_phones(reply: str) -> str:
+    """شبكة أمان: أي رقم موبايل مصري في الرد غير رقم الشركة بيتشال."""
+    allowed = _re.sub(r"\D", "", COMPANY_PHONE)[-10:]
+    def fix(m):
+        return m.group(0) if allowed and _re.sub(r"\D", "", m.group(0))[-10:] == allowed else "نفس الرقم ده"
+    return _PHONE_RE.sub(fix, reply)
+
+
 ROUTER_PROMPT = """أنت planner-router في نظام وكلاء لشركة عقارات مصرية.
 مهمتك تحلل رسالة العميل وترجع JSON فقط بالشكل ده بدون أي كلام زيادة:
 {
@@ -285,6 +297,8 @@ AGENT_PROMPT = f"""أنت real-estate-agent، مساعد مبيعات في شر�
 - ممنوع تخترع أسعار أو وحدات أو مواعيد. لو مش عارف، قول إن مستشار من الشركة هيتواصل معاه بالتفاصيل.
 - ممنوع تذكر رقم أي عمارة حقيقي. استخدم كود الوحدة بس (مثال: MAF-96-S-01).
 - لو العميل جاهز يعاين أو طلب يكلم حد، قوله إن زميلك هيكلمه قريب{(' أو يتصل على ' + COMPANY_PHONE) if COMPANY_PHONE else ''}.
+- ممنوع تكتب أي رقم تليفون غير رقم الشركة{(' ' + COMPANY_PHONE) if COMPANY_PHONE else ''}. متخترعش رقم للعميل ولا لزميلك. لو زميلك هيكلمه، قول "هيكلمك على نفس الرقم ده".
+- متأكدش معلومة العميل ماقالهاش (زي كاش أو تقسيط أو ميعاد) — اسأل عنها.
 - متقولش إنك ذكاء اصطناعي إلا لو العميل سأل صراحة — ولو سأل، قول الحقيقة."""
 
 
@@ -324,7 +338,7 @@ async def real_estate_agent(phone: str, name: str, text: str, routing: dict) -> 
     if cleaned[0]["role"] != "user":
         cleaned.pop(0)
     resp = await client.messages.create(model=MODEL, max_tokens=500, system=AGENT_PROMPT, messages=cleaned)
-    return _text(resp)
+    return _clean_phones(_text(resp))
 
 
 async def crm_publisher(phone: str, name: str, routing: dict, from_ad: bool) -> None:
