@@ -70,3 +70,10 @@ WhatsApp ← Configuration ← Webhook ← Edit:
 - العملاء الجايين من إعلانات Click-to-WhatsApp بيتعلّموا `from_ad: true` في `leads.json`.
 - ذاكرة المحادثة حاليًا في الرام — بتتمسح لو السيرفر عمل restart. الخطوة الجاية: قاعدة بيانات.
 - البوت ممنوع يذكر أرقام عمارات حقيقية، وبيستخدم كود الوحدة (MAF-…).
+
+## المتابعة التلقائية (followup.py)
+- **متابعة ١**: العميل ساكت من ١٨ ساعة وآخر رسالة كانت من البوت ← البوت يبعت رسالة قصيرة تكمّل الكلام (جوه نافذة الـ ٢٤ ساعة).
+- **متابعة ٢**: بعد ٣ أيام ← Template معتمد لو `FOLLOWUP_TEMPLATE` متظبط في `.env`، وإلا تنبيه تليجرام للفريق.
+- مفيش متابعة لعميل طلب موظف، أو قال "مش مهتم"، أو كان بيسلّم بس. ومفيش رسايل من ١٠ بالليل لـ ٩ الصبح (القاهرة).
+- الحالة: `curl -fsSL https://raw.githubusercontent.com/tatweerre-glitch/tatweerre/main/wa-bot/followups.sh | bash`
+- إعدادات اختيارية في `.env`: `FOLLOWUP_ENABLED=0` للإيقاف، `FOLLOWUP1_HOURS`، `FOLLOWUP2_HOURS`، `FOLLOWUP_TEMPLATE`، `FOLLOWUP_TEMPLATE_LANG` (الافتراضي ar).

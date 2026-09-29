@@ -30,6 +30,7 @@ from fastapi import BackgroundTasks, FastAPI, HTTPException, Query, Request  # n
 from fastapi.responses import PlainTextResponse  # noqa: E402
 
 import agents  # noqa: E402
+import followup  # noqa: E402
 import whatsapp  # noqa: E402
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
@@ -41,6 +42,12 @@ app = FastAPI(title="Tatweer WhatsApp Agents")
 
 # Meta ممكن تبعت نفس الرسالة أكتر من مرة — نمنع الرد المكرر
 _seen_ids: deque = deque(maxlen=2000)
+
+
+@app.on_event("startup")
+async def start_followups():
+    import asyncio
+    app.state.followup_task = asyncio.create_task(followup.loop())
 
 
 @app.get("/health")
@@ -178,6 +185,19 @@ async def send_text(to: str, body: str) -> dict:
         return r.json()
 
 
+async def send_template(to: str, name: str, lang: str, body_params: list[str]) -> dict:
+    """يبعت Template معتمد من ميتا (الطريقة الوحيدة المسموحة بعد ما نافذة الـ 24 ساعة تقفل)."""
+    url = f"https://graph.facebook.com/{GRAPH_VERSION}/{PHONE_NUMBER_ID}/messages"
+    template = {"name": name, "language": {"code": lang}}
+    if body_params:
+        template["components"] = [{"type": "body", "parameters": [{"type": "text", "text": p} for p in body_params]}]
+    payload = {"messaging_product": "whatsapp", "to": to, "type": "template", "template": template}
+    async with httpx.AsyncClient(timeout=20) as client:
+        r = await client.post(url, json=payload, headers={"Authorization": f"Bearer {ACCESS_TOKEN}"})
+        r.raise_for_status()
+        return r.json()
+
+
 async def mark_read(message_id: str) -> None:
     """يعلّم الرسالة كمقروءة (علامتين زرق) — بيدي انطباع احترافي."""
     url = f"https://graph.facebook.com/{GRAPH_VERSION}/{PHONE_NUMBER_ID}/messages"
@@ -225,7 +245,7 @@ _db.commit()
 
 
 class _History:
-    """آخر ١٠ رسائل لكل عميل — بتتقري وتتكتب في قاعدة البيانات."""
+    """آخر ٢٠ رسالة لكل عميل — بتتقري وتتكتب في قاعدة البيانات."""
     def __getitem__(self, phone):
         rows = _db.execute(
             "SELECT role, content FROM (SELECT id, role, content FROM messages WHERE phone=? ORDER BY id DESC LIMIT 20) ORDER BY id",
@@ -391,6 +411,8 @@ def _should_notify(phone: str, every_sec: int = 6 * 3600) -> bool:
 
 async def handle_message(phone: str, name: str, text: str, from_ad: bool = False) -> str:
     """نقطة الدخول: رسالة واحدة ← رد واحد."""
+    import followup
+    followup.on_customer_message(phone, text)
     routing = await planner_router(phone, text)
     reply = await real_estate_agent(phone, name, text, routing)
     if not reply:
@@ -402,6 +424,7 @@ async def handle_message(phone: str, name: str, text: str, from_ad: bool = False
     HISTORY[phone].append(("عميل", text))
     HISTORY[phone].append(("وكيل", reply))
     await crm_publisher(phone, name, routing, from_ad)
+    followup.on_customer_message(phone, text)  # مرة تانية عشان عميل جديد لسه متسجل دلوقتي
     if routing.get("needs_human") and _should_notify(phone):
         await notify_team(phone, name, text, routing)
     return reply
@@ -421,12 +444,201 @@ async def notify_team(phone: str, name: str, text: str, routing: dict) -> None:
 
 __EOF_TATWEER__
 
+cat > followup.py <<'__EOF_TATWEER__'
+"""
+المتابعة التلقائية للعملاء اللي سكتوا.
+
+  • متابعة ١ (جوه نافذة الـ ٢٤ ساعة): لو العميل ساكت من ١٨ ساعة أو أكتر وآخر رسالة كانت مننا،
+    البوت يبعتله رسالة قصيرة طبيعية تكمّل الكلام (Claude بيكتبها من المحادثة).
+  • متابعة ٢ (بعد ٣ أيام): برا نافذة الـ ٢٤ ساعة ميتا مش بتسمح غير بـ Template معتمد.
+    لو FOLLOWUP_TEMPLATE متظبط في .env بنبعته، ولو مش متظبط بنبعت تنبيه تليجرام للفريق يكلمه بنفسه.
+
+قواعد: مفيش متابعة لعميل طلب موظف (الفريق ماسكه)، أو قال "مش مهتم"، أو كلامه كان تحية بس.
+مفيش إرسال بالليل (بتوقيت القاهرة). أي رسالة جديدة من العميل بتبدأ الدورة من الأول.
+"""
+import asyncio
+import logging
+import os
+import re
+from datetime import datetime
+from zoneinfo import ZoneInfo
+
+import agents
+import whatsapp
+
+log = logging.getLogger("wa-bot")
+
+ENABLED = os.getenv("FOLLOWUP_ENABLED", "1") == "1"
+CHECK_EVERY_MIN = int(os.getenv("FOLLOWUP_CHECK_MIN", "10"))
+NUDGE1_AFTER_H = float(os.getenv("FOLLOWUP1_HOURS", "18"))
+NUDGE2_AFTER_H = float(os.getenv("FOLLOWUP2_HOURS", "72"))
+WINDOW_H = 23.5                      # هامش أمان قبل ما نافذة الـ ٢٤ ساعة تقفل
+TEMPLATE = os.getenv("FOLLOWUP_TEMPLATE", "")          # اسم الـ Template المعتمد من ميتا
+TEMPLATE_LANG = os.getenv("FOLLOWUP_TEMPLATE_LANG", "ar")
+QUIET_FROM, QUIET_TO = 22, 9         # مفيش رسايل من ١٠ بالليل لـ ٩ الصبح (القاهرة)
+CAIRO = ZoneInfo("Africa/Cairo")
+ACTIVE_INTENTS = {"buy", "rent", "sell", "inquiry"}
+
+OPT_OUT_RE = re.compile(r"مش مهتم|مش عايز|متبعتليش|متبعتش|بطّ?ل ?(تبعت|رسايل)|الغ[يى] الاشتراك|\bstop\b", re.I)
+
+agents._db.executescript("""
+CREATE TABLE IF NOT EXISTS followups (phone TEXT, kind TEXT, sent_ts TEXT, PRIMARY KEY (phone, kind));
+""")
+agents._db.commit()
+
+
+# ---------- بتتنده من handle_message مع كل رسالة جديدة من العميل ----------
+def on_customer_message(phone: str, text: str) -> None:
+    """العميل رد ← نصفّر المتابعات. ولو قال مش مهتم ← نوقف المتابعة خالص."""
+    agents._db.execute("DELETE FROM followups WHERE phone=?", (phone,))
+    agents._db.commit()
+    lead = agents.LEADS.get(phone)
+    if lead is not None:
+        opted = bool(OPT_OUT_RE.search(text or ""))
+        if lead.get("opted_out", False) != opted:
+            lead["opted_out"] = opted
+            agents.LEADS.save(phone)
+
+
+def _last_messages(phone: str):
+    """(آخر رسالة من العميل، آخر رسالة من البوت، دور آخر رسالة)."""
+    rows = agents._db.execute(
+        "SELECT role, ts FROM messages WHERE phone=? ORDER BY id DESC LIMIT 40", (phone,)).fetchall()
+    last_customer = next((datetime.fromisoformat(ts) for r, ts in rows if r == "عميل"), None)
+    last_role = rows[0][0] if rows else None
+    return last_customer, last_role
+
+
+def _sent(phone: str, kind: str) -> bool:
+    return agents._db.execute("SELECT 1 FROM followups WHERE phone=? AND kind=?", (phone, kind)).fetchone() is not None
+
+
+def _mark(phone: str, kind: str, now: datetime) -> None:
+    agents._db.execute("INSERT OR REPLACE INTO followups(phone, kind, sent_ts) VALUES (?,?,?)",
+                       (phone, kind, now.isoformat()))
+    agents._db.commit()
+
+
+def is_quiet_hours(cairo_now: datetime | None = None) -> bool:
+    h = (cairo_now or datetime.now(CAIRO)).hour
+    return h >= QUIET_FROM or h < QUIET_TO
+
+
+def candidates(now: datetime | None = None) -> list[tuple[str, str, float]]:
+    """مين محتاج متابعة دلوقتي: [(phone, 'nudge1' | 'nudge2', ساعات السكوت)]."""
+    now = now or datetime.now()
+    out = []
+    for phone, lead in list(agents.LEADS.items()):
+        if lead.get("opted_out") or lead.get("needs_human"):
+            continue
+        if lead.get("intent") not in ACTIVE_INTENTS:
+            continue
+        last_customer, last_role = _last_messages(phone)
+        if not last_customer or last_role != "وكيل":
+            continue  # العميل هو اللي كاتب آخر رسالة ← البوت لسه هيرد، مش متابعة
+        silent_h = (now - last_customer).total_seconds() / 3600
+        if NUDGE1_AFTER_H <= silent_h < WINDOW_H and not _sent(phone, "nudge1"):
+            out.append((phone, "nudge1", silent_h))
+        elif silent_h >= NUDGE2_AFTER_H and not _sent(phone, "nudge2"):
+            out.append((phone, "nudge2", silent_h))
+    return out
+
+
+NUDGE_PROMPT = agents.AGENT_PROMPT + """
+
+[مهمة خاصة] العميل ساكت من حوالي يوم. اكتب رسالة متابعة واحدة قصيرة جدًا (سطر أو اتنين) تكمّل من آخر نقطة في الكلام:
+فكّره بطلبه، واسأله السؤال الجاي اللي محتاجينه، أو اعرض إن زميلك يكلمه. من غير ضغط ومن غير اعتذار عن الإزعاج.
+ممنوع تخترع وحدات أو أسعار أو عروض. اكتب الرسالة بس من غير أي مقدمة."""
+
+NUDGE1_FALLBACK = "أهلًا بحضرتك تاني 👋 لسه مهتم نكمل ونشوفلك الوحدة المناسبة؟ لو حابب زميلي يكلمك قولّي."
+
+
+async def _write_nudge(phone: str) -> str:
+    msgs = [{"role": "user" if r == "عميل" else "assistant", "content": c} for r, c in agents.HISTORY[phone]]
+    msgs.append({"role": "user", "content": f"[داخلي: العميل ساكت. اللي متسجل عنه: {agents._known_facts(phone, {})}. اكتب رسالة المتابعة دلوقتي]"})
+    cleaned = []
+    for m in msgs:
+        if cleaned and cleaned[-1]["role"] == m["role"]:
+            cleaned[-1]["content"] += "\n" + m["content"]
+        else:
+            cleaned.append(m)
+    if cleaned[0]["role"] != "user":
+        cleaned.pop(0)
+    try:
+        resp = await agents.client.messages.create(model=agents.MODEL, max_tokens=2000, system=NUDGE_PROMPT, messages=cleaned)
+        text = agents._clean_phones(agents._text(resp))
+    except Exception:
+        log.exception("nudge generation failed for %s", phone)
+        text = ""
+    return text or NUDGE1_FALLBACK
+
+
+async def _notify(text: str) -> None:
+    token, chat_id = os.getenv("TELEGRAM_BOT_TOKEN"), os.getenv("TELEGRAM_CHAT_ID")
+    if not (token and chat_id):
+        return
+    import httpx
+    async with httpx.AsyncClient(timeout=10) as c:
+        await c.post(f"https://api.telegram.org/bot{token}/sendMessage", json={"chat_id": chat_id, "text": text})
+
+
+async def run_once(now: datetime | None = None, ignore_quiet: bool = False) -> list[str]:
+    """دورة واحدة: يبعت المتابعات المستحقة ويرجع ملخص باللي اتعمل."""
+    now = now or datetime.now()
+    if not ignore_quiet and is_quiet_hours():
+        return []
+    done = []
+    for phone, kind, silent_h in candidates(now):
+        lead = agents.LEADS.get(phone, {})
+        name = lead.get("name") or ""
+        try:
+            if kind == "nudge1":
+                text = await _write_nudge(phone)
+                await whatsapp.send_text(phone, text)
+                agents.HISTORY[phone].append(("وكيل", text))
+                done.append(f"{phone}: متابعة ١ اتبعتت")
+            elif TEMPLATE:
+                await whatsapp.send_template(phone, TEMPLATE, TEMPLATE_LANG, [name.split()[0] if name else "حضرتك"])
+                agents.HISTORY[phone].append(("وكيل", f"[رسالة متابعة Template: {TEMPLATE}]"))
+                done.append(f"{phone}: متابعة ٢ (Template) اتبعتت")
+            else:
+                await _notify(
+                    f"⏰ عميل ساكت من {int(silent_h // 24)} أيام ومحتاج مكالمة\n"
+                    f"الاسم: {name or '-'}\nالرقم: +{phone}\nواتساب: https://wa.me/{phone}\n"
+                    f"الطلب: {agents._known_facts(phone, {})}\n"
+                    f"(البوت مش هيقدر يبعتله غير بعد اعتماد Template المتابعة من ميتا)")
+                done.append(f"{phone}: متابعة ٢ ← تنبيه تليجرام")
+            _mark(phone, kind, now)
+        except Exception:
+            log.exception("follow-up %s failed for %s", kind, phone)
+    for d in done:
+        log.info("follow-up: %s", d)
+    return done
+
+
+async def loop() -> None:
+    if not ENABLED:
+        log.info("follow-up: disabled")
+        return
+    log.info("follow-up: on (every %s min, nudge1 after %sh, nudge2 after %sh, template=%s)",
+             CHECK_EVERY_MIN, NUDGE1_AFTER_H, NUDGE2_AFTER_H, TEMPLATE or "-")
+    while True:
+        await asyncio.sleep(60)  # نستنى دقيقة بعد التشغيل
+        try:
+            await run_once()
+        except Exception:
+            log.exception("follow-up loop error")
+        await asyncio.sleep(CHECK_EVERY_MIN * 60 - 60)
+
+__EOF_TATWEER__
+
 cat > requirements.txt <<'__EOF_TATWEER__'
 fastapi>=0.110
 uvicorn[standard]>=0.29
 httpx>=0.27
 anthropic>=0.40
 python-dotenv>=1.0
+tzdata>=2024.1
 
 __EOF_TATWEER__
 
