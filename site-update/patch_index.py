@@ -31,9 +31,10 @@ SCHEMA = {
     },
     "areaServed": "مدينة الفردوس، 6 أكتوبر، الجيزة",
     "sameAs": [
-        "https://www.facebook.com/profile.php?id=61591581585406",
+        "https://www.facebook.com/tatweereg.tech/",
         "https://www.instagram.com/adam_moh1234",
         "https://www.tiktok.com/@adamm384",
+        "https://www.youtube.com/@tatweerRE",
     ],
 }
 
