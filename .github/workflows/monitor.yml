@@ -1,0 +1,36 @@
+name: Tatweer monitor
+on:
+  schedule: [{ cron: "*/15 * * * *" }]
+  workflow_dispatch:
+permissions: { issues: write, contents: read }
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check site, bot and n8n
+        id: c
+        run: |
+          fail=""
+          site=$(curl -s --max-time 25 https://tatweereg.tech/ || true)
+          echo "$site" | grep -q "01286777111" || fail="$fail\n- الموقع tatweereg.tech مش بيفتح أو رقم التواصل اختفى"
+          bot=$(curl -s --max-time 25 https://bot.tatweereg.tech/health || true)
+          echo "$bot" | grep -q '"ok":true' || fail="$fail\n- بوت الواتساب bot.tatweereg.tech/health مش بيرد"
+          n8n=$(curl -s --max-time 25 https://tatweereg.tech/api/offer-unit || true)
+          echo "$n8n" | grep -qi "webhook" || fail="$fail\n- n8n (فورم «اعرض وحدتك») مش بيرد — العروض الجديدة مش هتتسجل"
+          days=$(echo | openssl s_client -servername tatweereg.tech -connect tatweereg.tech:443 2>/dev/null | openssl x509 -noout -enddate | cut -d= -f2)
+          if [ -n "$days" ]; then left=$(( ( $(date -d "$days" +%s) - $(date +%s) ) / 86400 )); [ "$left" -lt 14 ] && fail="$fail\n- شهادة HTTPS هتخلص بعد $left يوم"; fi
+          printf 'fail<<EOF\n%b\nEOF\n' "$fail" >> "$GITHUB_OUTPUT"
+          printf '%b\n' "${fail:-all good}"
+      - name: Open / update / close incident issue
+        env: { GH_TOKEN: "${{ github.token }}", FAIL: "${{ steps.c.outputs.fail }}" }
+        run: |
+          num=$(gh issue list -R "$GITHUB_REPOSITORY" --label incident --state open --json number -q '.[0].number')
+          if [ -z "$(echo "$FAIL" | tr -d '[:space:]')" ]; then
+            [ -n "$num" ] && gh issue close "$num" -R "$GITHUB_REPOSITORY" -c "✅ كله رجع شغال $(date -u +%FT%TZ)"
+            exit 0
+          fi
+          gh label create incident -R "$GITHUB_REPOSITORY" -c B60205 2>/dev/null || true
+          if [ -n "$num" ]; then
+            last=$(gh issue view "$num" -R "$GITHUB_REPOSITORY" --json comments,body -q '(.comments|last|.body) // .body')
+            [ "$last" != "$FAIL" ] && gh issue comment "$num" -R "$GITHUB_REPOSITORY" -b "$FAIL"
+          else gh issue create -R "$GITHUB_REPOSITORY" -t "🚨 مشكلة في موقع تطوير" -l incident -b "$FAIL"; fi
