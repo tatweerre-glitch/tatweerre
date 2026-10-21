@@ -40,6 +40,7 @@
 #units .tu-plan{position:absolute;inset:0;display:grid;place-items:center;color:#8b8577;background:
   linear-gradient(#ddd6c8 1px,transparent 1px) 0 0/22px 22px,linear-gradient(90deg,#ddd6c8 1px,transparent 1px) 0 0/22px 22px,#efeae0}
 #units .tu-plan svg{width:76%;height:auto}
+#units .tu-plan::after{content:attr(data-a);position:absolute;bottom:14%;font-weight:700;font-size:15px}
 #units .tu-play{position:absolute;inset:0;display:grid;place-items:center;pointer-events:none}
 #units .tu-play i{width:62px;height:62px;border-radius:50%;background:rgba(15,20,35,.65);display:grid;place-items:center;box-shadow:0 0 0 6px rgba(255,255,255,.25)}
 #units .tu-play i::after{content:"";border-inline-start:18px solid #fff;border-block:11px solid transparent;margin-inline-start:-4px;transform:scaleX(-1)}
@@ -224,10 +225,8 @@ function waLink(t){return "https://wa.me/"+WA+"?text="+encodeURIComponent(t)}
 function codeLabel(u){return /^\d+$/.test(u.id)?"كود "+u.id:u.id}
 function dealWord(u){return u.deal==="rent"?"للإيجار":"للبيع"}
 function src(m){return m.t==="yt"?"https://i.ytimg.com/vi/"+m.id+"/hqdefault.jpg":BASE+(m.t==="video"?m.poster:m.src)}
-function plan(u){return '<div class="tu-plan" aria-hidden="true"><svg viewBox="0 0 220 150" fill="none" stroke="currentColor" stroke-width="2">'+
- '<rect x="10" y="10" width="200" height="130" rx="2"/><path d="M90 10v70M10 80h80M150 10v60M150 70h60M150 100h60M150 100v40"/>'+
- '<g font-family="inherit" font-size="11" fill="currentColor" stroke="none" text-anchor="middle"><text x="50" y="48">غرفة نوم</text><text x="180" y="44">غرفة نوم</text>'+
- '<text x="180" y="89">حمام</text><text x="180" y="125">مطبخ</text><text x="85" y="114">ريسبشن</text><text x="85" y="132">'+u.area+' م²</text></g></svg></div>'}
+function plan(u){return '<div class="tu-plan" aria-hidden="true" data-a="'+u.area+' م²"><svg viewBox="0 0 220 150" fill="none" stroke="currentColor" stroke-width="2">'+
+ '<rect x="10" y="10" width="200" height="130" rx="2"/><path d="M90 10v70M10 80h80M150 10v60M150 70h60M150 100h60M150 100v40"/></svg></div>'}
 function slideHTML(u,m,eager){
   return '<div class="tu-slide">'+plan(u)+(m?'<img '+(eager?'':'loading="lazy" ')+'src="'+src(m)+'" alt="'+esc(m.alt||("فيديو "+u.title))+'" onerror="this.parentNode.classList.add(\'broken\')">':'')+
    (m&&m.t!=="img"?'<span class="tu-play"><i></i></span>':'')+'</div>'}
@@ -246,7 +245,7 @@ function card(u){
    '<div class="tu-track" style="transform:translateX('+(i*100)+'%)">'+ms.map(function(m,k){return slideHTML(u,m,k===0)}).join("")+'</div>'+
    (n>1?'<button type="button" class="tu-nav prev" data-step="-1" aria-label="السابق">›</button><button type="button" class="tu-nav next" data-step="1" aria-label="التالي">‹</button>'+
      '<div class="tu-dots">'+ms.map(function(_,k){return '<i class="'+(k===i?"on":"")+'"></i>'}).join("")+'</div>':'')+
-   (u.media.length>1?'<span class="tu-mcount tu-num">'+n+' صور وفيديو</span>':'')+'</div>'+
+   (u.media.length>1?'<span class="tu-mcount tu-num">'+n+(vids?' صور وفيديو':' صور')+'</span>':'')+'</div>'+
    '<div class="tu-body"><div class="tu-code tu-num">'+codeLabel(u)+'</div><h3>'+esc(u.title)+'</h3><div class="tu-loc">'+esc(u.loc)+'</div>'+
     '<div class="tu-specs tu-num"><div><b>'+u.area+'</b><span>م²</span></div><div><b>'+u.beds+'</b><span>غرف نوم</span></div><div><b>'+esc(u.floor)+'</b><span>الدور</span></div></div>'+
     '<div class="tu-tags">'+u.tags.slice(0,3).map(function(t){return '<span class="tu-tag">'+esc(t)+'</span>'}).join("")+'</div>'+
