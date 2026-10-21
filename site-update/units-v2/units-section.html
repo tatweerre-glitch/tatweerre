@@ -1,0 +1,395 @@
+<section id="units" data-tu="v2" style="padding-top:0">
+<style>
+/* قسم الوحدات التفاعلي — كل الستايل محصور جوه #units عشان مايأثرش على باقي الموقع */
+#units{--tu-navy:var(--navy,#1f2a44);--tu-gold:var(--gold,#b08d57);--tu-gold-soft:var(--gold-soft,#e9dcc2);--tu-paper:var(--paper,#f7f4ee);
+  --tu-card:var(--card,#fff);--tu-ink:var(--ink,#1b2233);--tu-muted:var(--muted,#555e70);--tu-line:var(--line,#e3ddd1);--tu-wa:#1f9d55;--tu-rent:#2b6cb0;--tu-sale:#8a5a17;--tu-ok:#1d7a52}
+#units *{box-sizing:border-box}
+#units .tu-num{font-variant-numeric:tabular-nums}
+#units button,#units input,#units select{font:inherit;color:inherit}
+#units button{cursor:pointer}
+#units .tu-stats{display:flex;flex-wrap:wrap;gap:6px 18px;color:var(--tu-muted);font-size:15px;margin-top:-14px;margin-bottom:18px}
+#units .tu-stats b{color:var(--tu-navy)}
+#units .tu-intent{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin-bottom:18px}
+@media (max-width:760px){#units .tu-intent{grid-template-columns:repeat(2,minmax(0,1fr))}}
+#units .tu-intent button{background:var(--tu-card);border:1px solid var(--tu-line);border-radius:12px;padding:12px 14px;text-align:start;display:flex;flex-direction:column;gap:2px;transition:border-color .15s,transform .15s}
+#units .tu-intent button:hover{border-color:var(--tu-gold);transform:translateY(-1px)}
+#units .tu-intent button[aria-pressed="true"]{border-color:var(--tu-gold);background:var(--tu-gold-soft)}
+#units .tu-intent b{color:var(--tu-navy);font-size:16px}
+#units .tu-intent span{font-size:13px;color:var(--tu-muted);line-height:1.5}
+#units .tu-rail{position:sticky;top:0;z-index:20;background:var(--tu-paper);border-block:1px solid var(--tu-line);display:flex;flex-wrap:wrap;gap:10px;align-items:center;padding:10px 0;margin-bottom:20px}
+#units .tu-seg{display:inline-flex;background:var(--tu-line);border-radius:999px;padding:3px}
+#units .tu-seg button{border:0;background:transparent;border-radius:999px;padding:6px 16px;font-weight:600;font-size:15px;color:var(--tu-muted);min-height:40px}
+#units .tu-seg button[aria-pressed="true"]{background:var(--tu-card);color:var(--tu-navy);box-shadow:0 1px 3px rgba(20,30,50,.15)}
+#units .tu-field{display:inline-flex;align-items:center;gap:6px;background:var(--tu-card);border:1px solid var(--tu-line);border-radius:999px;padding:0 12px;min-height:44px}
+#units .tu-field input,#units .tu-field select{border:0;background:transparent;outline:none;min-width:0;padding-block:8px;font-size:15px}
+#units .tu-field input{width:10em}
+#units .tu-chip{border:1px solid var(--tu-line);background:var(--tu-card);border-radius:999px;padding:8px 14px;min-height:44px;font-weight:600;font-size:15px}
+#units .tu-chip[aria-pressed="true"]{border-color:var(--tu-gold);color:#7a5e2e;background:var(--tu-gold-soft)}
+#units .tu-count{margin-inline-start:auto;color:var(--tu-muted);font-size:14px}
+#units .tu-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,330px),1fr));gap:20px}
+#units .tu-card{background:var(--tu-card);border:1px solid var(--tu-line);border-radius:14px;overflow:hidden;display:flex;flex-direction:column;transition:box-shadow .2s,transform .2s;scroll-margin-top:90px}
+#units .tu-card:hover{box-shadow:0 12px 30px -14px rgba(31,42,68,.45);transform:translateY(-2px)}
+#units .tu-media{position:relative;aspect-ratio:4/3;max-width:100%;background:#e9e4da;overflow:hidden;cursor:zoom-in}
+#units .tu-track{display:flex;height:100%;transition:transform .35s ease}
+#units .tu-slide{position:relative;flex:0 0 100%;height:100%}
+#units .tu-slide img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;display:block}
+#units .tu-slide.broken img{display:none}
+#units .tu-plan{position:absolute;inset:0;display:grid;place-items:center;color:#8b8577;background:
+  linear-gradient(#ddd6c8 1px,transparent 1px) 0 0/22px 22px,linear-gradient(90deg,#ddd6c8 1px,transparent 1px) 0 0/22px 22px,#efeae0}
+#units .tu-plan svg{width:76%;height:auto}
+#units .tu-play{position:absolute;inset:0;display:grid;place-items:center;pointer-events:none}
+#units .tu-play i{width:62px;height:62px;border-radius:50%;background:rgba(15,20,35,.65);display:grid;place-items:center;box-shadow:0 0 0 6px rgba(255,255,255,.25)}
+#units .tu-play i::after{content:"";border-inline-start:18px solid #fff;border-block:11px solid transparent;margin-inline-start:-4px;transform:scaleX(-1)}
+#units .tu-badges{position:absolute;top:10px;inset-inline-start:10px;display:flex;gap:6px;flex-wrap:wrap;z-index:2}
+#units .tu-badge{font-size:12.5px;font-weight:700;padding:2px 10px;border-radius:999px;background:#fff;color:var(--tu-navy);box-shadow:0 1px 4px rgba(0,0,0,.2);line-height:1.8}
+#units .tu-badge.rent{background:var(--tu-rent);color:#fff}
+#units .tu-badge.sale{background:var(--tu-sale);color:#fff}
+#units .tu-badge.new{background:var(--tu-ok);color:#fff}
+#units .tu-badge.vid{background:#c4302b;color:#fff}
+#units .tu-fav{position:absolute;top:8px;inset-inline-end:8px;z-index:2;width:42px;height:42px;border-radius:50%;border:0;background:rgba(255,255,255,.94);display:grid;place-items:center;color:#c0392b}
+#units .tu-fav svg{width:20px;height:20px}
+#units .tu-nav{position:absolute;top:50%;translate:0 -50%;z-index:2;width:38px;height:38px;border-radius:50%;border:0;background:rgba(255,255,255,.92);color:var(--tu-navy);font-size:22px;line-height:1;display:grid;place-items:center;opacity:0;transition:opacity .2s}
+#units .tu-media:hover .tu-nav,#units .tu-nav:focus-visible{opacity:1}
+@media (hover:none){#units .tu-nav{opacity:.9}}
+#units .tu-nav.prev{right:8px}#units .tu-nav.next{left:8px}
+#units .tu-dots{position:absolute;bottom:9px;inset-inline:0;display:flex;justify-content:center;gap:5px;z-index:2;pointer-events:none}
+#units .tu-dots i{width:7px;height:7px;border-radius:50%;background:rgba(255,255,255,.6)}
+#units .tu-dots i.on{background:#fff;width:18px;border-radius:4px}
+#units .tu-mcount{position:absolute;bottom:8px;inset-inline-end:10px;z-index:2;font-size:12px;background:rgba(15,20,35,.72);color:#fff;padding:1px 9px;border-radius:999px}
+#units .tu-body{padding:16px;display:flex;flex-direction:column;gap:10px;flex:1}
+#units .tu-code{font-size:12.5px;color:var(--tu-muted);letter-spacing:.03em}
+#units .tu-card h3{font-size:19px;line-height:1.45}
+#units .tu-loc{font-size:13.5px;color:var(--tu-muted)}
+#units .tu-specs{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));border:1px solid var(--tu-line);border-radius:10px;overflow:hidden}
+#units .tu-specs div{padding:7px 6px;text-align:center;border-inline-start:1px solid var(--tu-line);line-height:1.4}
+#units .tu-specs div:first-child{border-inline-start:0}
+#units .tu-specs b{display:block;color:var(--tu-navy);font-size:16px}
+#units .tu-specs span{font-size:12px;color:var(--tu-muted)}
+#units .tu-tags{display:flex;flex-wrap:wrap;gap:6px}
+#units .tu-tag{font-size:13px;background:var(--tu-paper);border:1px solid var(--tu-line);padding:1px 10px;border-radius:999px}
+#units .tu-price-row{display:flex;align-items:flex-end;justify-content:space-between;gap:10px;margin-top:auto;padding-top:10px;border-top:1px dashed var(--tu-line)}
+#units .tu-price{font-size:22px;font-weight:700;color:var(--tu-navy);line-height:1.3}
+#units .tu-price small{font-size:13px;font-weight:400;color:var(--tu-muted)}
+#units .tu-price.ask{font-size:16px;color:#8a6a35}
+#units .tu-ppm{font-size:12.5px;color:var(--tu-muted)}
+#units .tu-cmp{display:inline-flex;gap:6px;align-items:center;font-size:13.5px;color:var(--tu-muted);cursor:pointer;white-space:nowrap}
+#units .tu-cmp input{width:18px;height:18px;accent-color:var(--tu-gold)}
+#units .tu-actions{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+#units .tu-btn{display:inline-flex;justify-content:center;align-items:center;gap:6px;border-radius:10px;padding:8px 12px;font-weight:600;font-size:15px;min-height:46px;text-decoration:none;border:1px solid transparent;line-height:1.3}
+#units .tu-btn svg{width:18px;height:18px;flex:none}
+#units .tu-btn.wa{background:var(--tu-wa);color:#fff}
+#units .tu-btn.line{background:transparent;border-color:var(--tu-line);color:var(--tu-navy)}
+#units .tu-btn.gold{background:var(--tu-gold);color:#fff}
+#units .tu-btn.navy{background:var(--tu-navy);color:#fff}
+#units .tu-empty{grid-column:1/-1;text-align:center;padding:36px 16px;background:var(--tu-card);border:1px dashed var(--tu-line);border-radius:14px}
+#units .tu-req{background:var(--tu-navy);color:#fff;border-radius:14px;padding:22px;display:grid;grid-template-columns:1.2fr 1fr;gap:18px;align-items:center;margin-top:26px}
+@media (max-width:760px){#units .tu-req{grid-template-columns:1fr}}
+#units .tu-req h3{color:#fff;font-size:21px}
+#units .tu-req p{opacity:.82;margin:.3em 0 0}
+#units .tu-req form{display:flex;flex-wrap:wrap;gap:8px}
+#units .tu-req select,#units .tu-req input{flex:1 1 130px;min-width:0;border-radius:10px;border:0;padding:8px 12px;min-height:46px;background:#fff;color:var(--tu-ink)}
+#units .tu-scrim{position:fixed;inset:0;background:rgba(10,14,25,.6);z-index:1000;display:flex;align-items:flex-end;justify-content:center;padding-top:env(safe-area-inset-top,0px)}
+#units .tu-sheet{background:var(--tu-card);color:var(--tu-ink);width:min(1000px,100%);max-height:92vh;overflow:auto;border-radius:18px 18px 0 0;padding-bottom:env(safe-area-inset-bottom,0px)}
+@media (min-width:860px){#units .tu-scrim{align-items:center}#units .tu-sheet{border-radius:18px}}
+#units .tu-sheet-head{position:sticky;top:0;z-index:3;background:var(--tu-card);display:flex;align-items:center;gap:10px;padding:12px 16px;border-bottom:1px solid var(--tu-line)}
+#units .tu-sheet-head h2{font-size:19px;flex:1;min-width:0;line-height:1.4}
+#units .tu-x{width:42px;height:42px;border-radius:50%;border:1px solid var(--tu-line);background:var(--tu-card);font-size:24px;line-height:1;flex:none}
+#units .tu-sheet-body{padding:16px;display:grid;grid-template-columns:1.2fr 1fr;gap:22px}
+@media (max-width:860px){#units .tu-sheet-body{grid-template-columns:1fr}}
+#units .tu-col{min-width:0;display:flex;flex-direction:column;gap:14px}
+#units .tu-stage{position:relative;border-radius:12px;overflow:hidden;background:#111;display:grid;place-items:center;max-width:100%;min-height:240px}
+#units .tu-stage img{width:100%;max-height:70vh;object-fit:contain;display:block}
+#units .tu-stage video,#units .tu-stage iframe{display:block;width:min(100%,380px);aspect-ratio:9/16;border:0;background:#000;max-height:72vh}
+#units .tu-thumbs{display:flex;gap:8px;overflow-x:auto;padding-bottom:4px}
+#units .tu-thumbs button{flex:0 0 78px;height:60px;border-radius:8px;overflow:hidden;border:2px solid transparent;padding:0;position:relative;background:#e9e4da}
+#units .tu-thumbs button[aria-current="true"]{border-color:var(--tu-gold)}
+#units .tu-thumbs img{width:100%;height:100%;object-fit:cover;display:block}
+#units .tu-thumbs .tu-play i{width:28px;height:28px;box-shadow:none}
+#units .tu-thumbs .tu-play i::after{border-inline-start-width:9px;border-block-width:6px}
+#units .tu-kv{display:grid;grid-template-columns:auto 1fr;gap:6px 16px;font-size:15px;margin:0}
+#units .tu-kv dt{color:var(--tu-muted)}#units .tu-kv dd{margin:0;font-weight:500}
+#units .tu-trust{background:var(--tu-gold-soft);border-radius:10px;padding:10px 12px;font-size:14.5px}
+#units .tu-block{border:1px solid var(--tu-line);border-radius:12px;padding:14px;display:flex;flex-direction:column;gap:10px}
+#units .tu-block h3{font-size:17px}
+#units .tu-slots{display:flex;gap:6px;overflow-x:auto;padding-bottom:2px}
+#units .tu-slots button{flex:none;border:1px solid var(--tu-line);background:var(--tu-card);border-radius:10px;padding:5px 10px;font-size:13.5px;min-height:44px;text-align:center;line-height:1.4}
+#units .tu-slots button[aria-pressed="true"]{border-color:var(--tu-gold);background:var(--tu-gold-soft);font-weight:700}
+#units .tu-block input[type=text]{border:1px solid var(--tu-line);border-radius:10px;padding:8px 12px;background:var(--tu-card);min-height:46px;width:100%}
+#units .tu-range{display:flex;justify-content:space-between;font-size:14px;color:var(--tu-muted)}
+#units .tu-range b{color:var(--tu-navy)}
+#units input[type=range]{width:100%;accent-color:var(--tu-gold)}
+#units .tu-calc{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+#units .tu-calc div{background:var(--tu-paper);border-radius:10px;padding:6px 10px}
+#units .tu-calc span{font-size:12px;color:var(--tu-muted);display:block}
+#units .tu-calc b{font-size:17px;color:var(--tu-navy)}
+#units .tu-note{font-size:13px;color:var(--tu-muted);margin:0;line-height:1.6}
+#units .tu-tray{position:fixed;inset-inline:0;bottom:calc(18px + env(safe-area-inset-bottom,0px));z-index:900;display:flex;justify-content:center;padding-inline:16px;pointer-events:none}
+#units .tu-tray-in{pointer-events:auto;background:var(--tu-navy);color:#fff;border-radius:999px;padding:6px 6px 6px 16px;display:flex;align-items:center;gap:10px;box-shadow:0 10px 30px rgba(0,0,0,.3);font-size:14.5px}
+#units .tu-tray-in button{border:0;border-radius:999px;padding:6px 14px;font-weight:700;min-height:40px}
+#units .tu-tray-in .go{background:var(--tu-gold);color:#fff}
+#units .tu-tray-in .clr{background:transparent;color:#fff;opacity:.8}
+#units .tu-tblwrap{overflow-x:auto;padding:16px}
+#units table{border-collapse:collapse;width:100%;min-width:520px;font-size:15px}
+#units th,#units td{padding:10px;border-bottom:1px solid var(--tu-line);text-align:start;vertical-align:top}
+#units th{color:var(--tu-muted);font-weight:500;width:110px}
+#units .tu-toast{position:fixed;left:50%;translate:-50% 0;bottom:calc(84px + env(safe-area-inset-bottom,0px));z-index:1100;background:var(--tu-navy);color:#fff;padding:8px 16px;border-radius:999px;font-size:14.5px}
+#units :focus-visible{outline:3px solid var(--tu-gold);outline-offset:2px}
+#units [hidden]{display:none!important}
+@media (prefers-reduced-motion:reduce){#units *{transition:none!important}}
+</style>
+  <div class="wrap">
+    <div class="sec-head">
+      <span class="eyebrow">وحدات متاحة</span>
+      <h2>وحدات معروضة للبيع والإيجار دلوقتي</h2>
+    </div>
+    <div class="tu-stats tu-num" id="tuStats"></div>
+    <div class="tu-intent" role="group" aria-label="انت محتاج إيه؟">
+      <button type="button" data-intent="sale" aria-pressed="false"><b>عايز أشتري</b><span>شقق للبيع بعقد نهائي</span></button>
+      <button type="button" data-intent="rent" aria-pressed="false"><b>عايز أأجّر</b><span>شقق جاهزة للسكن</span></button>
+      <button type="button" data-intent="owner" aria-pressed="false"><b>عندي شقة أعرضها</b><span>التسويق مجاني للمالك</span></button>
+      <button type="button" data-intent="finish" aria-pressed="false"><b>تشطيب ورفع كفاءة</b><span>مقايسة مكتوبة بالبنود</span></button>
+    </div>
+    <div class="tu-rail">
+      <div class="tu-seg" role="group" aria-label="نوع العرض" id="tuDeal">
+        <button type="button" data-deal="all" aria-pressed="true">الكل</button>
+        <button type="button" data-deal="sale" aria-pressed="false">للبيع</button>
+        <button type="button" data-deal="rent" aria-pressed="false">للإيجار</button>
+      </div>
+      <label class="tu-field"><select id="tuSort" aria-label="ترتيب الوحدات">
+        <option value="new">الأحدث</option><option value="priceAsc">السعر: الأقل أولًا</option><option value="areaDesc">المساحة: الأكبر أولًا</option>
+      </select></label>
+      <label class="tu-field"><span aria-hidden="true">⌕</span><input id="tuQ" type="search" placeholder="ابحث بالكود أو الميزة" aria-label="ابحث في الوحدات"></label>
+      <button type="button" class="tu-chip" id="tuFav" aria-pressed="false">♥ المفضلة</button>
+      <span class="tu-count tu-num" id="tuCount" aria-live="polite"></span>
+    </div>
+    <span id="maf-96-r-03"></span><span id="apt77"></span>
+    <div class="tu-grid" id="tuGrid">
+      <noscript><p>الوحدات المتاحة: شقة 96 متر للإيجار MAF-96-R-04 (6,000 جنيه شهريًا)، شقة 77 متر للبيع كود 77 (1,300,000 جنيه)، شقة 96 متر للإيجار MAF-96-R-01، شقة 96 متر للبيع MAF-96-S-01. للتواصل: تليفون 01286777111 — واتساب 01043392721.</p></noscript>
+    </div>
+    <div class="tu-req">
+      <div>
+        <h3>مش لاقي الوحدة المناسبة؟</h3>
+        <p>قولنا المساحة والميزانية، وأول ما يتعرض عندنا وحدة مطابقة هنبعتلك على واتساب.</p>
+      </div>
+      <form id="tuReq">
+        <select id="tuReqDeal" aria-label="نوع الطلب"><option value="شراء">شراء</option><option value="إيجار">إيجار</option></select>
+        <input id="tuReqArea" type="text" inputmode="numeric" placeholder="المساحة (م²)" aria-label="المساحة المطلوبة">
+        <input id="tuReqBudget" type="text" placeholder="الميزانية" aria-label="الميزانية">
+        <button class="tu-btn wa" type="submit" style="flex:1 1 100%">بلّغني بالوحدات المطابقة</button>
+      </form>
+    </div>
+  </div>
+  <div class="tu-tray" id="tuTray" hidden><div class="tu-tray-in"><span id="tuTrayTxt"></span><button type="button" class="clr" id="tuTrayClr">مسح</button><button type="button" class="go" id="tuTrayGo">قارن الآن</button></div></div>
+  <div class="tu-scrim" id="tuScrim" hidden></div>
+  <div class="tu-toast" id="tuToast" hidden></div>
+<script>
+(function(){
+var ROOT=document.getElementById('units'); if(!ROOT) return;
+var PHONE="01286777111", PHONE_INTL="+201286777111", WA="201043392721", BASE="__BASE__";
+/* ===== بيانات الوحدات: عدّل هنا لما تضيف أو تبيع وحدة =====
+   deal: sale | rent — price: رقم أو null — status: new | hot | sold | "" — added: رقم أكبر = أحدث
+   media: {t:"video",src,poster} | {t:"yt",id} | {t:"img",src,alt} */
+var UNITS=[
+ {id:"MAF-96-R-04",anchor:"maf-96-r-03",deal:"rent",title:"شقة 96 متر للإيجار — دور أرضي، متجددة حديثًا",area:96,floor:"أرضي",beds:2,baths:1,price:6000,
+  loc:"إسكان القوات المسلحة – مدينة الفردوس – 6 أكتوبر",added:4,status:"new",
+  tags:["متجددة حديثًا","جاهزة للسكن","ريسبشن واسع ومنوّر","أمن وحراسة"],
+  desc:"شقة اتعمل لها تجديد حديث وجاهزة على السكن: غرفتين نوم وريسبشن واسع ومنور ومطبخ وحمام.",
+  media:[{t:"video",src:"maf-96-r-03-reel.mp4?v=4",poster:"maf-96-r-03-poster.jpg?v=4"}]},
+ {id:"77",anchor:"apt77",deal:"sale",title:"شقة 77 متر للبيع — أرضي مرتفع بفيو مفتوح",area:77,floor:"أرضي مرتفع",beds:2,baths:1,price:1300000,
+  loc:"إسكان القوات المسلحة – مدينة الفردوس",added:3,status:"hot",
+  tags:["فيو مفتوح","من غير طرقات","استلام فوري","أمن 24 ساعة"],
+  desc:"تقسيمة ذكية بتستغل كل متر: غرفتين نوم مقفولين بخصوصية كاملة وريسبشن واسع ومطبخ وحمام، واستلام فوري من غير أي مصاريف.",
+  media:[{t:"video",src:"apt77-reel.mp4?v=4",poster:"apt77-poster.jpg?v=4"}]},
+ {id:"MAF-96-R-01",deal:"rent",title:"شقة 96 متر للإيجار — الدور الأرضي، وسط المدينة",area:96,floor:"أرضي",beds:2,baths:1,price:null,
+  loc:"إسكان القوات المسلحة – مدينة الفردوس · وسط المدينة",added:2,status:"",
+  tags:["جنب كل الخدمات","جنب الجامع الرئيسي","منوّرة وهواها بحري"],
+  desc:"شقة في قلب وسط المدينة، قريبة من كل الخدمات والجامع الرئيسي، بإضاءة طبيعية وتهوية ممتازة.",
+  media:[{t:"img",src:"apt96r-1.jpg",alt:"غرفة نوم في الشقة"},{t:"img",src:"apt96r-2.jpg",alt:"شباك على مساحة خضراء"},{t:"img",src:"apt96r-3.jpg",alt:"أرضيات الشقة"},{t:"yt",id:"Sn_hSHG6zO4"}]},
+ {id:"MAF-96-S-01",deal:"sale",title:"شقة 96 متر للبيع — الدور الثالث أمام البوابة",area:96,floor:"الثالث",beds:2,baths:1,price:null,
+  loc:"إسكان القوات المسلحة – مدينة الفردوس",added:1,status:"",
+  tags:["تكييف مُركّب","بلكونة واسعة على الشارع","إضاءة طبيعية ممتازة","اتحاد ملاك قوي"],
+  desc:"عمارة فيها اتحاد ملاك قوي. عقد نهائي صادر من صندوق إسكان القوات المسلحة، ممهور بتوقيع مدير الصندوق وختم شعار الجمهورية.",
+  media:[{t:"img",src:"apt96-main.jpg",alt:"الإطلالة من بلكونة الشقة"},{t:"img",src:"apt96-1.jpg",alt:"الريسبشن"},{t:"img",src:"apt96-2.jpg",alt:"من داخل الشقة"},{t:"img",src:"apt96-3.jpg",alt:"من داخل الشقة"}]}
+];
+function $(s){return ROOT.querySelector(s)} function $$(s){return Array.prototype.slice.call(ROOT.querySelectorAll(s))}
+function fmt(n){return Number(n).toLocaleString("en-US")}
+function esc(s){return String(s).replace(/[&<>"]/g,function(c){return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]})}
+var store={get:function(k,d){try{var v=localStorage.getItem(k);return v?JSON.parse(v):d}catch(e){return d}},set:function(k,v){try{localStorage.setItem(k,JSON.stringify(v))}catch(e){}}};
+var st={deal:"all",sort:"new",q:"",favOnly:false,favs:store.get("tu_favs",[]),cmp:[],slide:{}};
+function has(a,x){return a.indexOf(x)>-1} function rm(a,x){var i=a.indexOf(x);if(i>-1)a.splice(i,1)}
+function waLink(t){return "https://wa.me/"+WA+"?text="+encodeURIComponent(t)}
+function codeLabel(u){return /^\d+$/.test(u.id)?"كود "+u.id:u.id}
+function dealWord(u){return u.deal==="rent"?"للإيجار":"للبيع"}
+function src(m){return m.t==="yt"?"https://i.ytimg.com/vi/"+m.id+"/hqdefault.jpg":BASE+(m.t==="video"?m.poster:m.src)}
+function plan(u){return '<div class="tu-plan" aria-hidden="true"><svg viewBox="0 0 220 150" fill="none" stroke="currentColor" stroke-width="2">'+
+ '<rect x="10" y="10" width="200" height="130" rx="2"/><path d="M90 10v70M10 80h80M150 10v60M150 70h60M150 100h60M150 100v40"/>'+
+ '<g font-family="inherit" font-size="11" fill="currentColor" stroke="none" text-anchor="middle"><text x="50" y="48">غرفة نوم</text><text x="180" y="44">غرفة نوم</text>'+
+ '<text x="180" y="89">حمام</text><text x="180" y="125">مطبخ</text><text x="85" y="114">ريسبشن</text><text x="85" y="132">'+u.area+' م²</text></g></svg></div>'}
+function slideHTML(u,m,eager){
+  return '<div class="tu-slide">'+plan(u)+(m?'<img '+(eager?'':'loading="lazy" ')+'src="'+src(m)+'" alt="'+esc(m.alt||("فيديو "+u.title))+'" onerror="this.parentNode.classList.add(\'broken\')">':'')+
+   (m&&m.t!=="img"?'<span class="tu-play"><i></i></span>':'')+'</div>'}
+var heart=function(on){return '<svg viewBox="0 0 24 24" fill="'+(on?"currentColor":"none")+'" stroke="currentColor" stroke-width="2"><path d="M12 21s-7.5-4.6-9.5-9.2C1 8 3.4 4.5 7 4.5c2 0 3.6 1.1 5 3 1.4-1.9 3-3 5-3 3.6 0 6 3.5 4.5 7.3C19.5 16.4 12 21 12 21Z"/></svg>'};
+var waIcon='<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 2a10 10 0 0 0-8.6 15.1L2 22l5-1.3A10 10 0 1 0 12 2Z"/></svg>';
+function priceHTML(u){return u.price==null?'<div class="tu-price ask">اسأل عن السعر</div>':'<div class="tu-price tu-num">'+fmt(u.price)+' <small>'+(u.deal==="rent"?"جنيه/شهر":"جنيه")+'</small></div>'}
+function ppm(u){return u.deal==="sale"&&u.price?'<div class="tu-ppm tu-num">≈ '+fmt(Math.round(u.price/u.area))+' جنيه للمتر</div>':''}
+function bookMsg(u){return "أهلاً تطوير العقارية، مهتم بالشقة "+u.area+" متر "+dealWord(u)+" ("+codeLabel(u)+") وعايز أحجز معاينة."}
+function card(u){
+  var ms=u.media.length?u.media:[null], n=ms.length, i=st.slide[u.id]||0, vids=u.media.filter(function(m){return m.t!=="img"}).length;
+  var badges='<span class="tu-badge '+u.deal+'">'+dealWord(u)+'</span>'+(u.status==="new"?'<span class="tu-badge new">جديدة</span>':u.status==="hot"?'<span class="tu-badge">عليها معاينات</span>':'')+(vids?'<span class="tu-badge vid">▶ فيديو</span>':'');
+  var isFav=has(st.favs,u.id);
+  return '<article class="tu-card" id="u-'+u.id+'" data-id="'+u.id+'">'+
+   '<div class="tu-media" role="button" tabindex="0" aria-label="افتح صور وفيديو '+esc(u.title)+'"><div class="tu-badges">'+badges+'</div>'+
+   '<button type="button" class="tu-fav" data-fav="'+u.id+'" aria-label="'+(isFav?"شيلها من المفضلة":"ضيفها للمفضلة")+'" aria-pressed="'+isFav+'">'+heart(isFav)+'</button>'+
+   '<div class="tu-track" style="transform:translateX('+(i*100)+'%)">'+ms.map(function(m,k){return slideHTML(u,m,k===0)}).join("")+'</div>'+
+   (n>1?'<button type="button" class="tu-nav prev" data-step="-1" aria-label="السابق">›</button><button type="button" class="tu-nav next" data-step="1" aria-label="التالي">‹</button>'+
+     '<div class="tu-dots">'+ms.map(function(_,k){return '<i class="'+(k===i?"on":"")+'"></i>'}).join("")+'</div>':'')+
+   (u.media.length>1?'<span class="tu-mcount tu-num">'+n+' صور وفيديو</span>':'')+'</div>'+
+   '<div class="tu-body"><div class="tu-code tu-num">'+codeLabel(u)+'</div><h3>'+esc(u.title)+'</h3><div class="tu-loc">'+esc(u.loc)+'</div>'+
+    '<div class="tu-specs tu-num"><div><b>'+u.area+'</b><span>م²</span></div><div><b>'+u.beds+'</b><span>غرف نوم</span></div><div><b>'+esc(u.floor)+'</b><span>الدور</span></div></div>'+
+    '<div class="tu-tags">'+u.tags.slice(0,3).map(function(t){return '<span class="tu-tag">'+esc(t)+'</span>'}).join("")+'</div>'+
+    '<div class="tu-price-row"><div>'+priceHTML(u)+ppm(u)+'</div><label class="tu-cmp"><input type="checkbox" data-cmp="'+u.id+'"'+(has(st.cmp,u.id)?" checked":"")+'> قارن</label></div>'+
+    '<div class="tu-actions"><a class="tu-btn wa" target="_blank" rel="noopener" href="'+waLink(bookMsg(u))+'">'+waIcon+' احجز معاينة</a>'+
+     '<button type="button" class="tu-btn line" data-open="'+u.id+'">التفاصيل والحجز</button></div></div></article>';
+}
+function list(){
+  var q=st.q.trim();
+  var r=UNITS.filter(function(u){return (st.deal==="all"||u.deal===st.deal)&&(!st.favOnly||has(st.favs,u.id))&&(!q||(u.id+" "+u.title+" "+u.tags.join(" ")+" "+u.loc+" "+u.floor+" "+u.area).indexOf(q)>-1)});
+  r.sort(function(a,b){return st.sort==="priceAsc"?((a.price==null?1e15:a.price)-(b.price==null?1e15:b.price)):st.sort==="areaDesc"?(b.area-a.area):(b.added-a.added)});
+  return r;
+}
+function render(){
+  var r=list();
+  $("#tuGrid").innerHTML=r.length?r.map(card).join(""):'<div class="tu-empty"><h3>مفيش وحدات مطابقة دلوقتي</h3><p style="color:var(--tu-muted);margin:6px 0 12px">غيّر الفلتر، أو سيبلنا طلبك تحت وهنبلّغك أول ما تتوفر وحدة.</p><button type="button" class="tu-btn line" id="tuReset">امسح الفلاتر</button></div>';
+  $("#tuCount").textContent=r.length+" من "+UNITS.length+" وحدات";
+  var rs=$("#tuReset"); if(rs) rs.onclick=function(){st.deal="all";st.q="";st.favOnly=false;$("#tuQ").value="";sync();render()};
+  tray();
+}
+function stats(){
+  var s=UNITS.filter(function(u){return u.deal==="sale"}).length, rents=UNITS.filter(function(u){return u.deal==="rent"&&u.price}).map(function(u){return u.price});
+  $("#tuStats").innerHTML='<span><b>'+UNITS.length+'</b> وحدات متاحة</span><span><b>'+s+'</b> للبيع · <b>'+(UNITS.length-s)+'</b> للإيجار</span>'+
+   (rents.length?'<span>إيجار من <b>'+fmt(Math.min.apply(null,rents))+'</b> جنيه/شهر</span>':'')+'<span>✓ عقود نهائية من الصندوق</span>';
+}
+function sync(){
+  $$("#tuDeal button").forEach(function(b){b.setAttribute("aria-pressed",b.dataset.deal===st.deal)});
+  $("#tuFav").setAttribute("aria-pressed",st.favOnly);
+  $$(".tu-intent button").forEach(function(b){b.setAttribute("aria-pressed",b.dataset.intent===st.deal)});
+}
+function toast(t){var el=$("#tuToast");el.textContent=t;el.hidden=false;clearTimeout(toast.t);toast.t=setTimeout(function(){el.hidden=true},2400)}
+function copy(text,msg){try{navigator.clipboard.writeText(text).then(function(){toast(msg||"اتنسخ ✓")},function(){toast(text)})}catch(e){toast(text)}}
+function tray(){var n=st.cmp.length;$("#tuTray").hidden=n<1;$("#tuTrayTxt").textContent=n<2?"اختار وحدة كمان للمقارنة":"اخترت "+n+" وحدات";$("#tuTrayGo").disabled=n<2;$("#tuTrayGo").style.opacity=n<2?.5:1}
+function step(c,d){var u=find(c.dataset.id),n=u.media.length;if(n<2)return;st.slide[u.id]=((st.slide[u.id]||0)+d+n)%n;
+  c.querySelector(".tu-track").style.transform="translateX("+(st.slide[u.id]*100)+"%)";
+  Array.prototype.forEach.call(c.querySelectorAll(".tu-dots i"),function(x,k){x.className=k===st.slide[u.id]?"on":""})}
+function find(id){for(var i=0;i<UNITS.length;i++)if(UNITS[i].id===id)return UNITS[i]}
+$("#tuGrid").addEventListener("click",function(e){
+  var f=e.target.closest("[data-fav]");
+  if(f){var id=f.dataset.fav;has(st.favs,id)?rm(st.favs,id):st.favs.push(id);store.set("tu_favs",st.favs);toast(has(st.favs,id)?"اتضافت للمفضلة ♥":"اتشالت من المفضلة");render();return}
+  var nv=e.target.closest("[data-step]"); if(nv){step(nv.closest(".tu-card"),Number(nv.dataset.step));return}
+  var o=e.target.closest("[data-open]"); if(o){openUnit(o.dataset.open,0);return}
+  var m=e.target.closest(".tu-media"); if(m&&!e.target.closest("button")){var c=m.closest(".tu-card");openUnit(c.dataset.id,st.slide[c.dataset.id]||0)}
+});
+$("#tuGrid").addEventListener("keydown",function(e){var m=e.target.closest(".tu-media");if(m&&e.target===m&&(e.key==="Enter"||e.key===" ")){e.preventDefault();openUnit(m.closest(".tu-card").dataset.id,0)}});
+$("#tuGrid").addEventListener("change",function(e){
+  var c=e.target.closest("[data-cmp]"); if(!c) return;
+  if(c.checked){if(st.cmp.length>=3){c.checked=false;toast("تقدر تقارن 3 وحدات بس");return}st.cmp.push(c.dataset.cmp)}else rm(st.cmp,c.dataset.cmp);tray();
+});
+var sx=null;
+$("#tuGrid").addEventListener("touchstart",function(e){if(e.target.closest(".tu-media"))sx=e.touches[0].clientX},{passive:true});
+$("#tuGrid").addEventListener("touchend",function(e){if(sx==null)return;var dx=e.changedTouches[0].clientX-sx;sx=null;var c=e.target.closest(".tu-card");if(c&&Math.abs(dx)>40)step(c,dx>0?1:-1)},{passive:true});
+$$("#tuDeal button").forEach(function(b){b.onclick=function(){st.deal=b.dataset.deal;sync();render()}});
+$("#tuSort").onchange=function(e){st.sort=e.target.value;render()};
+$("#tuQ").oninput=function(e){st.q=e.target.value;render()};
+$("#tuFav").onclick=function(){st.favOnly=!st.favOnly;sync();render()};
+$$(".tu-intent button").forEach(function(b){b.onclick=function(){
+  var it=b.dataset.intent;
+  if(it==="owner"){var of=document.getElementById("offer"); if(of){of.scrollIntoView({behavior:"smooth"});return} window.open(waLink("أهلاً تطوير العقارية، عندي شقة وعايز أعرضها."),"_blank");return}
+  if(it==="finish"){var lead=document.getElementById("lead"),ct=document.getElementById("contact");
+    if(lead&&lead.elements.need){Array.prototype.forEach.call(lead.elements.need.options,function(o){if(o.text.indexOf("تشطيب")>-1)lead.elements.need.value=o.value})}
+    if(ct){ct.scrollIntoView({behavior:"smooth"});return} window.open(waLink("أهلاً تطوير العقارية، عايز مقايسة تشطيب لشقتي."),"_blank");return}
+  st.deal=it;sync();render();$(".tu-rail").scrollIntoView({behavior:"smooth",block:"start"});
+}});
+$("#tuTrayClr").onclick=function(){st.cmp=[];render()};
+$("#tuTrayGo").onclick=compare;
+$("#tuReq").onsubmit=function(e){e.preventDefault();
+  var a=$("#tuReqArea").value.trim(),bg=$("#tuReqBudget").value.trim();
+  window.open(waLink("أهلاً تطوير العقارية، بدوّر على شقة "+$("#tuReqDeal").value+(a?" مساحة حوالي "+a+" م²":"")+(bg?" وميزانيتي "+bg:"")+"، بلّغوني لو فيه وحدة مطابقة."),"_blank");toast("الرسالة جاهزة على واتساب")};
+/* النافذة */
+var lastFocus=null;
+function sheet(title,html){lastFocus=document.activeElement;var s=$("#tuScrim");
+  s.innerHTML='<div class="tu-sheet" role="dialog" aria-modal="true" aria-label="'+esc(title)+'"><div class="tu-sheet-head"><h2>'+esc(title)+'</h2><button type="button" class="tu-x" aria-label="إغلاق">×</button></div>'+html+'</div>';
+  s.hidden=false;document.documentElement.style.overflow="hidden";s.querySelector(".tu-x").focus();s.querySelector(".tu-x").onclick=close}
+function close(){var s=$("#tuScrim");s.hidden=true;s.innerHTML="";document.documentElement.style.overflow="";if(history.replaceState&&/^#u-/.test(location.hash))history.replaceState(null,"",location.pathname+location.search+"#units");if(lastFocus)lastFocus.focus()}
+$("#tuScrim").addEventListener("click",function(e){if(e.target.id==="tuScrim")close()});
+document.addEventListener("keydown",function(e){if(e.key==="Escape"&&!$("#tuScrim").hidden)close()});
+function stage(u,m){
+  if(!m) return plan(u).replace('class="tu-plan"','class="tu-plan" style="position:relative;width:100%;aspect-ratio:4/3"');
+  if(m.t==="video") return '<video src="'+BASE+m.src+'" poster="'+BASE+m.poster+'" controls playsinline autoplay muted preload="metadata"></video>';
+  if(m.t==="yt") return '<iframe src="https://www.youtube-nocookie.com/embed/'+m.id+'?autoplay=1&mute=1" title="فيديو '+esc(u.title)+'" allow="autoplay; encrypted-media; picture-in-picture; fullscreen" allowfullscreen></iframe>';
+  return '<img src="'+BASE+m.src+'" alt="'+esc(m.alt||u.title)+'">';
+}
+function contactBlock(msg){
+  return '<div class="tu-block"><h3>كلّمنا مباشرة</h3><div class="tu-actions">'+
+   '<a class="tu-btn gold tu-num" href="tel:'+PHONE_INTL+'">اتصل '+PHONE+'</a><a class="tu-btn wa" target="_blank" rel="noopener" href="'+waLink(msg)+'">'+waIcon+' واتساب 01043392721</a></div></div>';
+}
+function openUnit(id,start){
+  var u=find(id); if(!u) return;
+  var days=[],k,d;
+  for(k=1;k<=6;k++){d=new Date();d.setDate(d.getDate()+k);days.push({key:d.toLocaleDateString("ar-EG",{weekday:"long",day:"numeric",month:"long"}),wd:d.toLocaleDateString("ar-EG",{weekday:"short"}),dm:d.toLocaleDateString("ar-EG",{day:"numeric",month:"short"})})}
+  var slots=["11 ص – 1 م","3 – 5 م","6 – 8 م"];
+  var html='<div class="tu-sheet-body"><div class="tu-col">'+
+   '<div class="tu-stage" id="tuStage">'+stage(u,u.media[start||0])+'</div>'+
+   (u.media.length>1?'<div class="tu-thumbs">'+u.media.map(function(m,i){return '<button type="button" data-g="'+i+'" aria-current="'+(i===(start||0))+'" aria-label="'+(m.t==="img"?"صورة":"فيديو")+' '+(i+1)+'"><img src="'+src(m)+'" alt="" loading="lazy" onerror="this.remove()">'+(m.t!=="img"?'<span class="tu-play"><i></i></span>':'')+'</button>'}).join("")+'</div>':'')+
+   '<p style="margin:0">'+esc(u.desc)+'</p>'+
+   '<dl class="tu-kv tu-num"><dt>الكود</dt><dd>'+codeLabel(u)+'</dd><dt>العرض</dt><dd>'+(u.deal==="rent"?"إيجار":"بيع")+'</dd><dt>المساحة</dt><dd>'+u.area+' م²</dd>'+
+    '<dt>الغرف</dt><dd>'+u.beds+' غرف نوم + ريسبشن · '+u.baths+' حمام</dd><dt>الدور</dt><dd>'+esc(u.floor)+'</dd><dt>الموقع</dt><dd>'+esc(u.loc)+'</dd>'+
+    '<dt>المميزات</dt><dd>'+u.tags.map(esc).join(" · ")+'</dd><dt>السعر</dt><dd>'+(u.price?fmt(u.price)+(u.deal==="rent"?" جنيه/شهر":" جنيه"):"اسأل عن السعر")+'</dd></dl>'+
+   '<div class="tu-trust">✓ عقد نهائي موثّق من صندوق إسكان القوات المسلحة — لا توكيلات ولا عقود عرفية.</div></div>'+
+   '<div class="tu-col"><div class="tu-block"><h3>احجز معاد معاينة</h3>'+
+    '<div class="tu-slots" id="tuDays">'+days.map(function(x,i){return '<button type="button" data-day="'+esc(x.key)+'" aria-pressed="'+(i===0)+'"><b>'+x.wd+'</b><br>'+x.dm+'</button>'}).join("")+'</div>'+
+    '<div class="tu-slots" id="tuTimes">'+slots.map(function(t,i){return '<button type="button" data-time="'+t+'" aria-pressed="'+(i===1)+'">'+t+'</button>'}).join("")+'</div>'+
+    '<input type="text" id="tuName" placeholder="اسمك (اختياري)" aria-label="الاسم">'+
+    '<a class="tu-btn wa" id="tuBook" target="_blank" rel="noopener" href="#">'+waIcon+' أكّد المعاد على واتساب</a>'+
+    '<p class="tu-note">الرسالة بتتفتح جاهزة بالكود واليوم والساعة، وإحنا بنأكد معاك.</p></div>'+
+   (u.deal==="sale"&&u.price?calcHTML():'')+
+   contactBlock("أهلاً تطوير العقارية، عندي سؤال عن الشقة ("+codeLabel(u)+").")+
+   '<button type="button" class="tu-btn line" id="tuShare">انسخ رابط الوحدة وابعته لحد</button></div></div>';
+  sheet(u.title,html);
+  var s=$("#tuScrim");
+  function bk(){var dd=s.querySelector('#tuDays [aria-pressed="true"]').dataset.day,tt=s.querySelector('#tuTimes [aria-pressed="true"]').dataset.time,nm=s.querySelector("#tuName").value.trim();
+    s.querySelector("#tuBook").href=waLink("أهلاً تطوير العقارية"+(nm?"، أنا "+nm:"")+". عايز أحجز معاينة للشقة "+u.area+" متر "+dealWord(u)+" ("+codeLabel(u)+") يوم "+dd+" الساعة "+tt+".")}
+  Array.prototype.forEach.call(s.querySelectorAll("#tuDays button,#tuTimes button"),function(b){b.onclick=function(){Array.prototype.forEach.call(b.parentNode.querySelectorAll("button"),function(x){x.setAttribute("aria-pressed",x===b)});bk()}});
+  s.querySelector("#tuName").oninput=bk;bk();
+  Array.prototype.forEach.call(s.querySelectorAll("[data-g]"),function(b){b.onclick=function(){s.querySelector("#tuStage").innerHTML=stage(u,u.media[b.dataset.g]);
+    Array.prototype.forEach.call(s.querySelectorAll("[data-g]"),function(x){x.setAttribute("aria-current",x===b)})}});
+  s.querySelector("#tuShare").onclick=function(){copy("https://tatweereg.tech/#u-"+u.id,"رابط الوحدة اتنسخ ✓")};
+  if(u.deal==="sale"&&u.price)wireCalc(u);
+  if(history.replaceState)history.replaceState(null,"","#u-"+u.id);
+  if(window.gtag)try{gtag("event","view_item",{item_id:u.id})}catch(e){}
+}
+function calcHTML(){return '<div class="tu-block"><h3>حاسبة الدفع على مراحل</h3>'+
+  '<div class="tu-range"><span>المقدّم</span><b class="tu-num" id="tuDpL"></b></div><input type="range" id="tuDp" min="10" max="70" step="5" value="30" aria-label="نسبة المقدم">'+
+  '<div class="tu-range"><span>المدة</span><b class="tu-num" id="tuYL"></b></div><input type="range" id="tuY" min="6" max="36" step="6" value="12" aria-label="عدد الشهور">'+
+  '<div class="tu-calc tu-num"><div><span>المقدّم</span><b id="tuDpV"></b></div><div><span>القسط الشهري</span><b id="tuMV"></b></div></div>'+
+  '<p class="tu-note">حساب تقديري بدون فوائد عشان تعرف حدود ميزانيتك. نظام السداد المتاح بيتحدد مع المالك، اسألنا عليه.</p></div>'}
+function wireCalc(u){var s=$("#tuScrim"),dp=s.querySelector("#tuDp"),y=s.querySelector("#tuY");
+  function run(){var d=Math.round(u.price*dp.value/100),m=Math.round((u.price-d)/y.value);
+    s.querySelector("#tuDpL").textContent=dp.value+"%";s.querySelector("#tuYL").textContent=y.value+" شهر";
+    s.querySelector("#tuDpV").textContent=fmt(d)+" جنيه";s.querySelector("#tuMV").textContent=fmt(m)+" جنيه"}
+  dp.oninput=y.oninput=run;run()}
+function compare(){
+  var us=UNITS.filter(function(u){return has(st.cmp,u.id)});
+  function row(h,f){return '<tr><th>'+h+'</th>'+us.map(function(u){return '<td>'+f(u)+'</td>'}).join("")+'</tr>'}
+  sheet("مقارنة الوحدات",'<div class="tu-tblwrap"><table class="tu-num"><thead><tr><th></th>'+us.map(function(u){return '<td><b>'+esc(u.title)+'</b><br><span style="color:var(--tu-muted);font-size:12.5px">'+codeLabel(u)+'</span></td>'}).join("")+'</tr></thead><tbody>'+
+   row("العرض",function(u){return u.deal==="rent"?"إيجار":"بيع"})+row("السعر",function(u){return u.price?fmt(u.price)+(u.deal==="rent"?" جنيه/شهر":" جنيه"):"اسأل عن السعر"})+
+   row("المساحة",function(u){return u.area+" م²"})+row("سعر المتر",function(u){return u.deal==="sale"&&u.price?fmt(Math.round(u.price/u.area))+" جنيه":"—"})+
+   row("الدور",function(u){return esc(u.floor)})+row("الغرف",function(u){return u.beds+" نوم + ريسبشن"})+row("المميزات",function(u){return u.tags.map(esc).join("<br>")})+
+   row("",function(u){return '<a class="tu-btn wa" target="_blank" rel="noopener" href="'+waLink(bookMsg(u))+'">احجز معاينة</a>'})+'</tbody></table></div>');
+}
+stats();sync();render();
+/* روابط قديمة ومشاركة: #u-كود أو #maf-96-r-03 أو #apt77 */
+var h=(location.hash||"").replace(/^#/,""), hit=null;
+UNITS.forEach(function(u){if(h==="u-"+u.id||(u.anchor&&h===u.anchor))hit=u});
+if(hit){var el=document.getElementById("u-"+hit.id);if(el)el.scrollIntoView();openUnit(hit.id,0)}
+})();
+</script>
+</section>
