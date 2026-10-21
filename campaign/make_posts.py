@@ -21,7 +21,7 @@ body{font-family:'IBM Plex Sans Arabic',Tahoma,sans-serif;direction:rtl;backgrou
 .ph{position:absolute;inset:0;background-size:cover;background-position:center}
 .shade{position:absolute;inset:0;background:linear-gradient(180deg,rgba(15,21,36,.15) 0%,rgba(15,21,36,.45) 36%,rgba(15,21,36,.9) 56%,#162036 100%)}
 .top{position:absolute;top:44px;right:48px;left:48px;display:flex;justify-content:space-between;align-items:flex-start}
-.logo{background:#fff;border-radius:18px;padding:12px 20px;display:flex}
+.logo{background:#1f2a44;border:2px solid rgba(227,194,122,.7);border-radius:18px;padding:12px 22px;display:flex}
 .logo img{height:74px;width:auto;display:block}
 .badge{background:#f5c400;color:#1f2a44;font-weight:700;font-size:34px;padding:10px 26px;border-radius:999px}
 .content{position:absolute;right:56px;left:56px;bottom:190px}
