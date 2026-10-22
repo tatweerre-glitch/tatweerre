@@ -7,18 +7,25 @@ jobs:
   probe:
     runs-on: ubuntu-latest
     steps:
-      - name: Check site, bot and n8n
+      - name: Check site, form backend and HTTPS
         id: c
         run: |
           fail=""
+          # الموقع (على Railway): الصفحة بتفتح ورقم التواصل موجود
           site=$(curl -s --max-time 25 https://tatweereg.tech/ || true)
           echo "$site" | grep -q "01286777111" || fail="$fail\n- الموقع tatweereg.tech مش بيفتح أو رقم التواصل اختفى"
-          bot=$(curl -s --max-time 25 https://bot.tatweereg.tech/health || true)
-          echo "$bot" | grep -q '"ok":true' || fail="$fail\n- بوت الواتساب bot.tatweereg.tech/health مش بيرد"
-          n8n=$(curl -s --max-time 25 https://tatweereg.tech/api/offer-unit || true)
+          # سيرفر الموقع نفسه
+          hz=$(curl -s --max-time 25 https://tatweereg.tech/healthz || true)
+          [ "$hz" = "ok" ] || fail="$fail\n- سيرفر الموقع مش بيرد على /healthz"
+          # n8n اللي بيستقبل فورم «اعرض وحدتك»: لما يكون شغال بيرد على GET برسالة فيها كلمة webhook
+          n8n=$(curl -s --max-time 25 https://primary-production-7909.up.railway.app/webhook/tatweer-offer-unit || true)
           echo "$n8n" | grep -qi "webhook" || fail="$fail\n- n8n (فورم «اعرض وحدتك») مش بيرد — العروض الجديدة مش هتتسجل"
-          days=$(echo | openssl s_client -servername tatweereg.tech -connect tatweereg.tech:443 2>/dev/null | openssl x509 -noout -enddate | cut -d= -f2)
-          if [ -n "$days" ]; then left=$(( ( $(date -d "$days" +%s) - $(date +%s) ) / 86400 )); [ "$left" -lt 14 ] && fail="$fail\n- شهادة HTTPS هتخلص بعد $left يوم"; fi
+          # شهادة HTTPS
+          end=$(echo | openssl s_client -servername tatweereg.tech -connect tatweereg.tech:443 2>/dev/null | openssl x509 -noout -enddate | cut -d= -f2)
+          if [ -n "$end" ]; then
+            left=$(( ( $(date -d "$end" +%s) - $(date +%s) ) / 86400 ))
+            if [ "$left" -lt 14 ]; then fail="$fail\n- شهادة HTTPS هتخلص بعد $left يوم"; fi
+          fi
           printf 'fail<<EOF\n%b\nEOF\n' "$fail" >> "$GITHUB_OUTPUT"
           printf '%b\n' "${fail:-all good}"
       - name: Open / update / close incident issue
@@ -26,11 +33,15 @@ jobs:
         run: |
           num=$(gh issue list -R "$GITHUB_REPOSITORY" --label incident --state open --json number -q '.[0].number')
           if [ -z "$(echo "$FAIL" | tr -d '[:space:]')" ]; then
-            [ -n "$num" ] && gh issue close "$num" -R "$GITHUB_REPOSITORY" -c "✅ كله رجع شغال $(date -u +%FT%TZ)"
+            if [ -n "$num" ]; then gh issue close "$num" -R "$GITHUB_REPOSITORY" -c "✅ كله رجع شغال $(date -u +%FT%TZ)"; fi
             exit 0
           fi
           gh label create incident -R "$GITHUB_REPOSITORY" -c B60205 2>/dev/null || true
           if [ -n "$num" ]; then
             last=$(gh issue view "$num" -R "$GITHUB_REPOSITORY" --json comments,body -q '(.comments|last|.body) // .body')
-            [ "$last" != "$FAIL" ] && gh issue comment "$num" -R "$GITHUB_REPOSITORY" -b "$FAIL"
-          else gh issue create -R "$GITHUB_REPOSITORY" -t "🚨 مشكلة في موقع تطوير" -l incident -b "$FAIL"; fi
+            if [ "$(echo "$last" | tr -d '[:space:]')" != "$(echo "$FAIL" | tr -d '[:space:]')" ]; then
+              gh issue comment "$num" -R "$GITHUB_REPOSITORY" -b "$FAIL"
+            fi
+          else
+            gh issue create -R "$GITHUB_REPOSITORY" -t "🚨 مشكلة في موقع تطوير" -l incident -b "$FAIL"
+          fi
